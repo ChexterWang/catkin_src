@@ -1,0 +1,4 @@
+float32 startPointX
+float32 startPointY
+float32 endPointX
+float32 endPointY

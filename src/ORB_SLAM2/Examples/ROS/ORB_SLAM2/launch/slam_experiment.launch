@@ -1,0 +1,4 @@
+<launch>
+ <node pkg="ORB_SLAM2" type="Exp" name="Exp"  output="screen"  args="/home/brian/catkin_ws/src/ORB_SLAM2/Vocabulary/ORBvoc.txt 
+	    /home/brian/catkin_ws/src/ORB_SLAM2/Examples/Monocular/TUM2.yaml"> </node>
+</launch>

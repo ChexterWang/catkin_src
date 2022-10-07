@@ -1,0 +1,4 @@
+<launch>
+    <include file="$(find darknet_ros)/launch/darknet_ros.launch" > </include>
+    <include file ="$(find ORB_SLAM2)/launch/slam_experiment.launch"> </include>
+</launch>

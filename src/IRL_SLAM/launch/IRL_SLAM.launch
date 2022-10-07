@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="IRL_SLAM" name="IRL_websocket" type="IRL_websocket.py" output="screen"></node>
+    <include file="$(find detect_3d_cuboid)/launch/IRL_object_detect.launch" > </include>
+
+</launch>
