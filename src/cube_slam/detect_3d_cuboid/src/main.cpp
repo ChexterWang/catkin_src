@@ -1,7 +1,11 @@
 // std c
 #include <stdio.h>
+#include <math.h> 
 #include <iostream>
 #include <string>
+#include <mutex>
+#include <stack>
+#include <map>
 
 // opencv
 #include <opencv/cv.h>
@@ -33,100 +37,95 @@
 #include <line_lbd/my_pose.h>
 #include <line_lbd/final_pose.h>
 #include <line_lbd/combined_boxes.h>
-#include <mutex>
-#include <stack>
 #include <line_lbd/anchor_objects.h>
 #include <line_lbd/anchor_pose.h>
-
-#include <math.h> 
 
 using namespace std;
 using namespace Eigen;
 
+/* classes:
+    person
+    bicycle
+    car
+    motorbike
+    aeroplane
+    bus
+    train
+    truck
+    boat
+    traffic light
+    fire hydrant
+    stop sign
+    parking meter
+    bench
 
-// classes:
-// person
-// bicycle
-// car
-// motorbike
-// aeroplane
-// bus
-// train
-// truck
-// boat
-// traffic light
-// fire hydrant
-// stop sign
-// parking meter
-// bench
-// 
-// backpack
-// umbrella
-// handbag
-// tie
-// suitcase
-// frisbee
-// skis
-// snowboard
-// sports ball
-// kite
-// baseball bat
-// baseball glove
-// skateboard
-// surfboard
-// tennis racket
-// bottle
-// wine glass
-// cup
-// fork
-// knife
-// spoon
-// bowl
-// banana
-// apple
-// sandwich
-// orange
-// broccoli
-// carrot
-// hot dog
-// pizza
-// donut
-// cake
-// chair
-// sofa
-// pottedplant
-// bed
-// diningtable
-// toilet
-// tvmonitor
-// laptop
-// mouse
-// remote
-// keyboard
-// cell phone
-// microwave
-// oven
-// toaster
-// sink
-// refrigerator
-// book
-// clock
-// vase
-// scissors
-// teddy bear
-// hair drier
-// toothbrush
+    backpack
+    umbrella
+    handbag
+    tie
+    suitcase
+    frisbee
+    skis
+    snowboard
+    sports ball
+    kite
+    baseball bat
+    baseball glove
+    skateboard
+    surfboard
+    tennis racket
+    bottle
+    wine glass
+    cup
+    fork
+    knife
+    spoon
+    bowl
+    banana
+    apple
+    sandwich
+    orange
+    broccoli
+    carrot
+    hot dog
+    pizza
+    donut
+    cake
+    chair
+    sofa
+    pottedplant
+    bed
+    diningtable
+    toilet
+    tvmonitor
+    laptop
+    mouse
+    remote
+    keyboard
+    cell phone
+    microwave
+    oven
+    toaster
+    sink
+    refrigerator
+    book
+    clock
+    vase
+    scissors
+    teddy bear
+    hair drier
+    toothbrush
+*/
+
 #define DYSIZE 14
 string Dynamic_objects[] = {"person", "bird", "cat", "dog", "horse", "sheep", "cow",
 "elephant", "bear", "zebra", "giraffe","diningtable", "tvmonitor","chair"};
 
 #define AnchorSize 2
-
 // string Anchor_objects[] = {"laptop","book", "mouse", "keyboard", "cup", "bottle", "pottedplant"};
 string Anchor_objects[] = {"mouse", "bottle"};
 
 #undef VERBOSE
-
 
 // bool done =false;
 class Box_handler{
@@ -138,28 +137,29 @@ class Box_handler{
         ros::Subscriber pose_sub;
         ros::Publisher anchor_pub;
         ros::Publisher final_pub;
+        ros::NodeHandle nh;
 
-        bool has_edge = false;
-        bool has_pose = false;
+        map<string, bool> has_edge; // viewer
+        map<string, bool> has_pose; // viewer
         bool has_image = false;
-        bool initial = false;
+        map<string, bool> initial; // viewer
+
+        map<string, line_lbd::my_pose> current_pose; // viewer
+        map<string, line_lbd::my_pose> pose; // viewer
+        detect_3d_cuboid detect_cuboid_obj;
+        
+        map<string, Eigen::MatrixXd> all_lines_raw; // viewer
+        Matrix3d Kalib;
+/*      // stack<cv::Mat> st;
+        // cv::Mat InitToGround; 
         // Matrix4d trans;
         
         //  rgb_img;
-        line_lbd::my_pose current_pose;
-        
-        ros::NodeHandle nh;
-        Eigen::MatrixXd all_lines_raw;
-        detect_3d_cuboid detect_cuboid_obj;
-        Matrix3d Kalib;
-        stack<cv::Mat> st;
-        line_lbd::my_pose pose;
-        cv::Mat InitToGround; 
-        
-        
-
+*/
     public:
         Box_handler(){
+            has_edge["0"], has_pose["0"], initial["0"] = false, false, false;
+            all_lines_raw["0"] = Eigen::MatrixXd(100,4);
             image_transport::ImageTransport it(nh);
             final_pub = nh.advertise<line_lbd::final_pose>("/final_pose",1);
             anchor_pub = nh.advertise<line_lbd::anchor_objects>("/anchor_objects",1);
@@ -167,82 +167,44 @@ class Box_handler{
             edge_sub = nh.subscribe("/edge_detect",10 ,&Box_handler::edgeCallback,this);
             box_sub = nh.subscribe("/my_bounding_boxes",1,&Box_handler::boxCallback,this);
             pose_sub = nh.subscribe("/SLAM_pose",10,&Box_handler::poseCallback,this);
-            all_lines_raw = Eigen::MatrixXd(100,4);
-            // Kalib << 529.5000, 0, 365.0000,
-            //     0, 529.5000, 265.0000,
-            //     0, 0, 1.0000;
-
-
             Kalib << 737.037, 0, 340.565,
                 0, 699.167, 218.486,
                 0, 0, 1.0000;
-            
-            
+/*          Kalib << 529.5000, 0, 365.0000,
+                0, 529.5000, 265.0000,
+                0, 0, 1.0000;
 
-            // trans << 1, 0, 0, 0,
-            //     0, 1, 0,0,
-            //     0, 0, 1,1,
-            //     0, 0,0, 1;
-            
+            trans << 1, 0, 0, 0,
+                0, 1, 0,0,
+                0, 0, 1,1,
+                0, 0,0, 1;
+*/
             detect_cuboid_obj.whether_plot_detail_images = false;
             detect_cuboid_obj.whether_plot_final_images = true;
             detect_cuboid_obj.print_details = false; // false  true
             detect_cuboid_obj.set_calibration(Kalib);
             detect_cuboid_obj.whether_sample_bbox_height = false;
             detect_cuboid_obj.whether_sample_cam_roll_pitch = false;
-
-            
-            InitToGround = cv::Mat::eye(4, 4, CV_32F);
-            // // set initial camera pose wrt ground. by default camera parallel to ground, height=1.7 (kitti)
-            // double init_x, init_y, init_z, init_qx, init_qy, init_qz, init_qw;
-            // n.param<double>("init_x", init_x, 0);
-            // n.param<double>("init_y", init_y, 0);
-            // n.param<double>("init_z", init_z, 1.7);
-            // n.param<double>("init_qx", init_qx, -0.7071);
-            // n.param<double>("init_qy", init_qy, 0);
-            // n.param<double>("init_qz", init_qz, 0);
-            // n.param<double>("init_qw", init_qw, 0.7071);
+/*          // set initial camera pose wrt ground. by default camera parallel to ground, height=1.7 (kitti)
+            double init_x, init_y, init_z, init_qx, init_qy, init_qz, init_qw;
+            n.param<double>("init_x", init_x, 0);
+            n.param<double>("init_y", init_y, 0);
+            n.param<double>("init_z", init_z, 1.7);
+            n.param<double>("init_qx", init_qx, -0.7071);
+            n.param<double>("init_qy", init_qy, 0);
+            n.param<double>("init_qz", init_qz, 0);
+            n.param<double>("init_qw", init_qw, 0.7071);
+*/
             Eigen::Quaternionf pose_quat(0.7071, -0.7071, 0, 0);
             Eigen::Matrix3f rot = pose_quat.toRotationMatrix(); // 	The quaternion is required to be normalized
+/*          InitToGround = cv::Mat::eye(4, 4, CV_32F);
             for (int row = 0; row < 3; row++)
                 for (int col = 0; col < 3; col++)
                     InitToGround.at<float>(row, col) = rot(row, col);
-
             InitToGround.at<float>(0, 3) = 0;
             InitToGround.at<float>(1, 3) = 0;
             InitToGround.at<float>(2, 3) = 1.35;
-
-        }
-
-        void imageCallback(const  sensor_msgs::ImageConstPtr& msg)
-        {
-            try{
-                // const std::lock_guard<std::mutex> lock(mutex_image);
-                
-                // cv::Mat rgb_img = cv_bridge::toCvShare(msg, "rgb8")->image;
-                // st.push(rgb_img);
-                has_image = true;
-                // done = true;
-                // cout << rgb_img.size()<<endl;
-                // cout << rgb_img.channels() <<endl;
-            }catch(cv_bridge::Exception& e){
-                ROS_ERROR("Could not convert from '%s' to 'rgb8'.", msg->encoding.c_str());
-            }
-            
-        }
-
-        void poseCallback(const line_lbd::my_pose::ConstPtr & msg )
-        {
-            #ifdef VERBOSE
-            cout << "get pose !!!!!!!!!!!!!!!!!"<<endl;
-            #endif
-            // current_pose.id = msg->id;  
-            current_pose.Rotation=msg->Rotation;
-            current_pose.Trans=msg->Trans;
-            current_pose.rot_tcw = msg->rot_tcw;
-            current_pose.trans_tcw = msg->trans_tcw;
-            has_pose = true;
-            initial = true;
+*/
         }
 
         bool is_dynamic(const string Class)
@@ -264,6 +226,38 @@ class Box_handler{
             return false;
         }
 
+        void imageCallback(const sensor_msgs::ImageConstPtr& msg)
+        {
+            try{
+/*              const std::lock_guard<std::mutex> lock(mutex_image);
+                
+                cv::Mat rgb_img = cv_bridge::toCvShare(msg, "rgb8")->image;
+                st.push(rgb_img);
+                done = true;
+                cout << rgb_img.size()<<endl;
+                cout << rgb_img.channels() <<endl;
+*/
+                has_image = true;
+            }catch(cv_bridge::Exception& e){
+                ROS_ERROR("Could not convert from '%s' to 'rgb8'.", msg->encoding.c_str());
+            }
+            
+        }
+
+        void poseCallback(const line_lbd::my_pose::ConstPtr & msg )
+        {
+            #ifdef VERBOSE
+            cout << "get pose !!!!!!!!!!!!!!!!!"<<endl;
+            #endif
+            current_pose.id = msg->id;  
+            current_pose.Rotation=msg->Rotation;
+            current_pose.Trans=msg->Trans;
+            current_pose.rot_tcw = msg->rot_tcw;
+            current_pose.trans_tcw = msg->trans_tcw;
+            has_pose = true;
+            initial = true;
+        }
+
         void boxCallback(const darknet_ros_msgs::MyBoundingBoxes::ConstPtr& msg)
         {
             #ifdef VERBOSE
@@ -272,18 +266,16 @@ class Box_handler{
 
             if(!has_edge || !initial) return;
             
-            
+            cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_now, sensor_msgs::image_encodings::RGB8);
+            cv::Mat img_raw = cv_ptr->image.clone();
+/*
             // const std::lock_guard<std::mutex> lock(mutex_image);
 
-            cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_now, sensor_msgs::image_encodings::RGB8);
-
-            cv::Mat img_raw = cv_ptr->image.clone();
             // cv::Mat img_raw =st.top();
             // st.pop();
             // cv::imshow( "display", img_raw );
             // cv::waitKey(1);
-        
-            
+*/
             int len = msg->count;
             int objects_count = 0;
 
@@ -295,12 +287,14 @@ class Box_handler{
             {   
                 if(is_dynamic(msg->bounding_boxes[i].Class)) continue;
                 if(!is_anchor(msg->bounding_boxes[i].Class)) continue;
+/*
                 // if(is_anchor(msg->bounding_boxes[i].Class)){
                 //     anchor_objects.push_back(true);
                 //     anchor_names.push_back(msg->bounding_boxes[i].Class);
                 // }else{
                 //     anchor_objects.push_back(false);
                 // }
+*/
                 anchor_objects.push_back(false);
                 anchor_names.push_back(msg->bounding_boxes[i].Class);
                 static_objects.push_back(i);
@@ -323,15 +317,13 @@ class Box_handler{
                 tmp++;      
             }
             obj_bbox_coors.leftCols<2>().array() -= 1;
-            
-           
+/*
             // Kalib << 737.037, 0, 340.565,
             //     0, 699.167, 218.486,
             //     0, 0, 1.0000;
 
             // cv::Mat R = pose.Rotation;
 
-            Matrix4f trans_tmp;
             
             // if(!has_pose){
             //     trans << 1, 0, 0, 0,
@@ -340,16 +332,15 @@ class Box_handler{
             //     0, 0, 0, 1; 
     
             // }
+*/
+            Matrix4f trans_tmp;
             cv::Mat frame_pose_to_ground;
             
             if(has_pose){
                 pose = current_pose;
-
                 float sy = sqrt(pose.Rotation.at(0) * pose.Rotation.at(0) +  pose.Rotation.at(3) * pose.Rotation.at(3));
                 bool singular = sy < 1e-6;
-                
                 float x, y, z;
-
                 if (!singular)
                 {
                     x = atan2(pose.Rotation.at(7) , pose.Rotation.at(8));
@@ -362,9 +353,7 @@ class Box_handler{
                     y = atan2(-pose.Rotation.at(6), sy);
                     z = 0;
                 }
-
-                
-                
+/*                
                 // cout << "==================================================="<<endl;
                 // cout << "x: "<< x <<"y: "<< y <<"z: "<< z << endl;
                 // // cout << pose.Rotation.at(0) <<", "<<pose.Rotation.at(1)<<", "<<pose.Rotation.at(2)<<endl;
@@ -381,12 +370,12 @@ class Box_handler{
                 // 0, 1, 0,0,
                 // -sin(y), 0, cos(y),1,
                 // 0, 0,0,1;
-
+*/
                 trans_tmp <<1, 0, 0, 0, 
                 0, cos(x), -sin(x),0,
                 0, sin(x), cos(x), 1,
                 0, 0,0,1;
-
+/*
                 // cv::Mat trans;
                 // if (build_worldframe_on_ground){ // if initial world frame is on ground, directly use it.
                 // trans = frame_pose_to_init;
@@ -417,8 +406,7 @@ class Box_handler{
                 // pose.Rotation.at(6), pose.Rotation.at(7), pose.Rotation.at(8),0,
                 // pose.Rotation.at(3), pose.Rotation.at(4), pose.Rotation.at(5),1.35,
                 // 0,0,0,1;
-
-
+*/
                 #ifdef VERBOSE
                 cout << "==================================================="<<endl;
                 cout << pose.Rotation.at(0) <<", "<<pose.Rotation.at(1)<<", "<<pose.Rotation.at(2)<<endl;
@@ -426,6 +414,7 @@ class Box_handler{
                 cout << pose.Rotation.at(6) <<", "<<pose.Rotation.at(7)<<", "<<pose.Rotation.at(8)<<endl;
                 cout << "==================================================="<<endl;
                 #endif
+/*
                 // } else { // if not, apply T_ground_init
                 //     frame_pose_to_ground = InitToGround * frame_pose_to_init;
                 // }
@@ -437,27 +426,23 @@ class Box_handler{
                 
 
                 // trans = trans_tmp;
-
+*/
             }
-            // has_pose = false;
 
+            // has_pose = false;
+/*
             // Eigen::Matrix<float, 4, 4> transToWolrd_;
 
             // for (int ii = 0; ii < 4; ii++)
             //     for (int jj = 0; jj < 4; jj++)
             //         transToWolrd_(ii, jj) = frame_pose_to_ground.at<float>(ii, jj);
-                    
+*/                    
             Matrix4f transToWolrd;
             Matrix4f tmp_;
-
-
-
             tmp_ << 1, 0.0011, 0.0004, 0, // hard coded  NOTE if accurate camera roll/pitch, could sample it!
             0, -0.3376, 0.9413, 0,
             0.0011, -0.9413, -0.3376, 0.11,
             0, 0, 0, 1;
-            
-
             transToWolrd = trans_tmp*tmp_;
             
             line_lbd::final_pose return_pose;
@@ -483,10 +468,7 @@ class Box_handler{
             cout << "time of bounding_box for one frame: "<<ttrack <<endl;
             #endif
 
-            
-
-            
-            return_pose.id = pose.id;
+            return_pose.id = msg->id;
             #ifdef VERBOSE
             cout << "pose rotation size: "<<pose.Rotation.size()<<endl;
             #endif
@@ -507,11 +489,9 @@ class Box_handler{
             int count_ = 0;
             int tmp_count = 0;
             
-
             for(std::vector<ObjectSet>::iterator it = all_object_cuboids.begin();it!=all_object_cuboids.end();++it)
             {
                 line_lbd::combined_boxes box;
-                
                 std::vector<cuboid *> cuboids = *it;
                 if(cuboids.size()==0) {
                     tmp_count++;
@@ -521,11 +501,6 @@ class Box_handler{
                     // cout << "========================================="<<anchor_names[tmp_count]<< "=================================================="<<endl;
                     box.class_name = anchor_names[tmp_count];                 
                 }
-                // if(box.class_name == "keyboard"){
-                //     tmp_count++;
-                //     continue;
-                // }
-                
                 cuboid *tmp = cuboids[0];
                 // config_type 2*1
                 #ifdef VERBOSE
@@ -554,7 +529,7 @@ class Box_handler{
                     }
                 }
                 return_pose.boxes.push_back(box);
-
+/*
                 // if(tmp->box_corners_2d(0,0))
                 // {
                 //     int right = tmp->box_corners_2d(0,0);
@@ -580,12 +555,9 @@ class Box_handler{
 
                 //     }
                 // }
-                
-
+*/                
                 tmp_count++;
                 count_++;
-
-
             }
             #ifdef VERBOSE
             cout << "all object cuboids: "<< count_<<endl;
@@ -597,17 +569,12 @@ class Box_handler{
             cvImage_.encoding = sensor_msgs::image_encodings::RGB8;
             cvImage_.image = cv::Mat(img_raw) ;
             return_pose.image_now = *cvImage_.toImageMsg();
-
-
-
             return_pose.count= count_;
-
             final_pub.publish(return_pose);
             #ifdef VERBOSE
             cout << "3D objects !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"<<endl;
             #endif
-
-            
+/*
             // MatrixXd obj_bbox_coors(1, 5);                // hard coded
             // obj_bbox_coors << 188, 189, 201, 311, 0.8800; // [x y w h prob]
             // cout << xmin<<", "<<ymin <<", "<<w<<", "<<h<<", "<<prob<<endl;
@@ -628,10 +595,7 @@ class Box_handler{
             //     done =false;
             // cout << all_object_cuboids << endl;
             // }
-            
-        
-            
-            
+*/  
         }
 
         void edgeCallback(const line_lbd::Keyline_vec::ConstPtr& msg)
@@ -639,7 +603,6 @@ class Box_handler{
             all_lines_raw = Eigen::MatrixXd(100,4);
             line_lbd::Keyline tmp;
             int row_counter = 0;
-            current_pose.id = msg->id;
             for(int i=0;i<msg->length;++i)
             {
                 tmp = msg->Keylines[i];
@@ -667,6 +630,7 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "detect_3d_cuboid");
     Box_handler bh;
     ros::spin();
+/*
     // ros::Rate loop_rate(5);
     // while (nh.ok()) {
     //     pub.publish(msg);
@@ -717,5 +681,6 @@ int main(int argc, char **argv)
     
 
     // ca::Profiler::print_aggregated(std::cout);
+*/
     return 0;
 }

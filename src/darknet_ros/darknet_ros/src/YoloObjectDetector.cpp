@@ -129,7 +129,8 @@ void YoloObjectDetector::init() {
   bool detectionImageLatch;
 
 
-  nodeHandle_.param("subscribers/camera_reading/topic", cameraTopicName, std::string("/camera/image_raw"));
+  // nodeHandle_.param("subscribers/camera_reading/topic", cameraTopicName, std::string("/camera/image_raw"));
+  nodeHandle_.param("subscribers/camera_reading/topic", cameraTopicName, std::string("/camera/rgb/My_image"));
   nodeHandle_.param("subscribers/camera_reading/queue_size", cameraQueueSize, 1);
   nodeHandle_.param("publishers/object_detector/topic", objectDetectorTopicName, std::string("found_object"));
   nodeHandle_.param("publishers/object_detector/queue_size", objectDetectorQueueSize, 1);
@@ -141,7 +142,10 @@ void YoloObjectDetector::init() {
   nodeHandle_.param("publishers/detection_image/queue_size", detectionImageQueueSize, 1);
   nodeHandle_.param("publishers/detection_image/latch", detectionImageLatch, true);
 
-  imageSubscriber_ = imageTransport_.subscribe(cameraTopicName, cameraQueueSize, &YoloObjectDetector::cameraCallback, this);
+  // imageSubscriber_ = imageTransport_.subscribe(cameraTopicName, cameraQueueSize, &YoloObjectDetector::cameraCallback, this);
+  // idk why following line won't work. it seems that the nodeHandle_ parameter's is contaminated.
+  // imageSubscriber_ = nodeHandle_.subscribe(cameraTopicName, cameraQueueSize, &YoloObjectDetector::cameraCallback, this);
+  imageSubscriber_ = nodeHandle_.subscribe(std::string("/camera/rgb/My_image"), 1, &YoloObjectDetector::cameraCallback, this);
   objectPublisher_ =
       nodeHandle_.advertise<darknet_ros_msgs::ObjectCount>(objectDetectorTopicName, objectDetectorQueueSize, objectDetectorLatch);
   boundingBoxesPublisher_ =
@@ -160,7 +164,35 @@ void YoloObjectDetector::init() {
   checkForObjectsActionServer_->start();
 }
 
-void YoloObjectDetector::cameraCallback(const sensor_msgs::ImageConstPtr& msg) {
+void YoloObjectDetector::cameraCallback(const line_lbd::My_image::ConstPtr& msg) {
+  ROS_DEBUG("[YoloObjectDetector] USB image received.");
+
+  cv_bridge::CvImagePtr cam_image;
+
+  try {
+    cam_image = cv_bridge::toCvCopy(msg->image_now, sensor_msgs::image_encodings::RGB8);
+  } catch (cv_bridge::Exception& e) {
+    ROS_ERROR("Could not convert to 'rgb8'.");
+    return;
+  }
+
+  if (cam_image) {
+    {
+      boost::unique_lock<boost::shared_mutex> lockImageCallback(mutexImageCallback_);
+      camImageCopy_ = cam_image->image.clone();
+    }
+    {
+      boost::unique_lock<boost::shared_mutex> lockImageStatus(mutexImageStatus_);
+      imageStatus_ = true;
+    }
+    frameWidth_ = cam_image->image.size().width;
+    frameHeight_ = cam_image->image.size().height;
+    id_now = msg->id;
+  }
+  return;
+}
+
+/* void YoloObjectDetector::cameraCallback(const sensor_msgs::ImageConstPtr& msg) {
   ROS_DEBUG("[YoloObjectDetector] USB image received.");
 
   cv_bridge::CvImagePtr cam_image;
@@ -198,7 +230,7 @@ void YoloObjectDetector::cameraCallback(const sensor_msgs::ImageConstPtr& msg) {
     id_now = msg->header.frame_id;
   }
   return;
-}
+} */
 
 void YoloObjectDetector::checkForObjectsActionGoalCB() {
   ROS_DEBUG("[YoloObjectDetector] Start check for objects action.");
@@ -595,7 +627,7 @@ void* YoloObjectDetector::publishInThread() {
     My_boundingBoxesResults_.image_header = headerBuff_[(buffIndex_ + 1) % 3];
     boundingBoxesResults_.count = num;
     My_boundingBoxesResults_.count = num;
-    
+    My_boundingBoxesResults_.id = id_now;
 
     cv_bridge::CvImage cvImage_;
     cvImage_.header.stamp = imageHeader_.stamp;

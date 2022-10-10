@@ -143,7 +143,7 @@ void imageCallback(const line_lbd::My_image::ConstPtr & msg)
 	      cout << "done edge sending"<<endl;
         #endif
     }catch(cv_bridge::Exception& e){
-        ROS_ERROR("Could not convert from to 'rgb8'.");
+        ROS_ERROR("Could not convert to 'rgb8'.");
     }
     
 }

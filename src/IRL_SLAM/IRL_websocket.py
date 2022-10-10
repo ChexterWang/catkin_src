@@ -240,13 +240,20 @@ async def main_loop():
                     #     f.write('place_now: '+ place_now)
                     #     f.write('\n')
 
+                    if(place_now == "getId"):
+                        # assign id to device
+                        if(int(device_id_now) < 0):
+                            print(f"assign id {server.assigned_id_now} to device")
+                            await wsPub(websocket, topic, f"id,{server.assigned_id_now}")
+                            server.assigned_id_now += 1
+                        
                     if(place_now == "viewer"):
                         if(not server.relocalize):
                             print(f"no host, relocalize")
-                            # assign id to device
-                            await wsPub(websocket, topic, f"relocalize,{server.assigned_id_now}")
-                            server.assigned_id_now += 1
+                            await wsPub(websocket, topic, f"relocalize")
                         else:
+                            if(int(device_id_now) < 1):
+                                return
                             server.has_viewer = True
                             print(f"[virtual_angle/scene_check] start")
 

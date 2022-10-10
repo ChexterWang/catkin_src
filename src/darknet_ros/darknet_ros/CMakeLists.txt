@@ -203,6 +203,10 @@ add_dependencies(${PROJECT_NAME}_lib
   darknet_ros_msgs_generate_messages_cpp
 )
 
+add_dependencies(${PROJECT_NAME}_lib
+  line_lbd_generate_messages_cpp
+)
+
 install(TARGETS ${PROJECT_NAME}_lib
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
