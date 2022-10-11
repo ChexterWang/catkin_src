@@ -249,22 +249,57 @@ class Box_handler{
             #ifdef VERBOSE
             cout << "get pose !!!!!!!!!!!!!!!!!"<<endl;
             #endif
-            current_pose.id = msg->id;  
-            current_pose.Rotation=msg->Rotation;
-            current_pose.Trans=msg->Trans;
-            current_pose.rot_tcw = msg->rot_tcw;
-            current_pose.trans_tcw = msg->trans_tcw;
-            has_pose = true;
-            initial = true;
+            if(has_pose.size() > 50) return;
+            string _id = msg->id;
+            current_pose[_id].Rotation=msg->Rotation;
+            current_pose[_id].Trans=msg->Trans;
+            current_pose[_id].rot_tcw = msg->rot_tcw;
+            current_pose[_id].trans_tcw = msg->trans_tcw;
+            has_pose[_id] = true;
+            initial[_id] = true;
+        }
+
+        void edgeCallback(const line_lbd::Keyline_vec::ConstPtr& msg)
+        {
+            #ifdef VERBOSE
+            cout << "edge detected!!!"<<endl;
+            #endif
+            if(has_edge.size() > 50) return;
+            string _id = msg->id;
+            all_lines_raw[_id] = Eigen::MatrixXd(100,4);
+            line_lbd::Keyline tmp;
+            int row_counter = 0;
+            for(int i=0;i<msg->length;++i)
+            {
+                tmp = msg->Keylines[i];
+                all_lines_raw[_id](i,0) = tmp.startPointX;
+                all_lines_raw[_id](i,1) = tmp.startPointY;
+                all_lines_raw[_id](i,2) = tmp.endPointX;
+                all_lines_raw[_id](i,3) = tmp.endPointY;
+                row_counter++;
+                if (i >= all_lines_raw[_id].rows()) // if matrix row is not enough, make more space.
+                        all_lines_raw[_id].conservativeResize(all_lines_raw[_id].rows() * 2, all_lines_raw[_id].cols());
+            }
+
+            all_lines_raw[_id].conservativeResize(row_counter, all_lines_raw[_id].cols());
+            has_edge[_id] = true;  
         }
 
         void boxCallback(const darknet_ros_msgs::MyBoundingBoxes::ConstPtr& msg)
         {
+            string _id = msg->id;
             #ifdef VERBOSE
-            cout << "boxCallback has_pose: "<<has_pose<<endl;
+            // If _id can be found in has_pose, then print has_pose[_id]
+            cout << "boxCallback has_pose: "<< (has_pose.find(_id) != has_pose.end())?has_pose[_id]:false <<endl;
             #endif
 
-            if(!has_edge || !initial) return;
+            // Short circuit evaluation: if lhs is true, rhs will not be checked.
+            // If _id can be found in has_edge(lhs is false), it will check if has_edge[_id] is true
+            // Theoretically, if there is record in has_edge, it should be true
+            // Same rules are apply to initial. If neither has_edge nor initial are true, then return
+            if(has_edge.find(_id) == has_edge.end() || !has_edge[_id]){
+                if(initial.find(_id) == initial.end() || !initial[_id]) return;
+            }
             
             cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_now, sensor_msgs::image_encodings::RGB8);
             cv::Mat img_raw = cv_ptr->image.clone();
@@ -336,21 +371,21 @@ class Box_handler{
             Matrix4f trans_tmp;
             cv::Mat frame_pose_to_ground;
             
-            if(has_pose){
-                pose = current_pose;
-                float sy = sqrt(pose.Rotation.at(0) * pose.Rotation.at(0) +  pose.Rotation.at(3) * pose.Rotation.at(3));
+            if(has_pose[_id]){
+                pose[_id] = current_pose[_id];
+                float sy = sqrt(pose[_id].Rotation.at(0) * pose[_id].Rotation.at(0) +  pose[_id].Rotation.at(3) * pose[_id].Rotation.at(3));
                 bool singular = sy < 1e-6;
                 float x, y, z;
                 if (!singular)
                 {
-                    x = atan2(pose.Rotation.at(7) , pose.Rotation.at(8));
-                    y = atan2(-pose.Rotation.at(6), sy);
-                    z = atan2(pose.Rotation.at(3), pose.Rotation.at(0));
+                    x = atan2(pose[_id].Rotation.at(7) , pose[_id].Rotation.at(8));
+                    y = atan2(-pose[_id].Rotation.at(6), sy);
+                    z = atan2(pose[_id].Rotation.at(3), pose[_id].Rotation.at(0));
                 }
                 else
                 {
-                    x = atan2(-pose.Rotation.at(5), pose.Rotation.at(4));
-                    y = atan2(-pose.Rotation.at(6), sy);
+                    x = atan2(-pose[_id].Rotation.at(5), pose[_id].Rotation.at(4));
+                    y = atan2(-pose[_id].Rotation.at(6), sy);
                     z = 0;
                 }
 /*                
@@ -409,9 +444,9 @@ class Box_handler{
 */
                 #ifdef VERBOSE
                 cout << "==================================================="<<endl;
-                cout << pose.Rotation.at(0) <<", "<<pose.Rotation.at(1)<<", "<<pose.Rotation.at(2)<<endl;
-                cout << pose.Rotation.at(3) <<", "<<pose.Rotation.at(4)<<", "<<pose.Rotation.at(5)<<endl;
-                cout << pose.Rotation.at(6) <<", "<<pose.Rotation.at(7)<<", "<<pose.Rotation.at(8)<<endl;
+                cout << pose[_id].Rotation.at(0) <<", "<<pose[_id].Rotation.at(1)<<", "<<pose[_id].Rotation.at(2)<<endl;
+                cout << pose[_id].Rotation.at(3) <<", "<<pose[_id].Rotation.at(4)<<", "<<pose[_id].Rotation.at(5)<<endl;
+                cout << pose[_id].Rotation.at(6) <<", "<<pose[_id].Rotation.at(7)<<", "<<pose[_id].Rotation.at(8)<<endl;
                 cout << "==================================================="<<endl;
                 #endif
 /*
@@ -458,10 +493,10 @@ class Box_handler{
             // // {
             #ifdef VERBOSE
             cout << "img_raw: "<<img_raw.size()<<endl;
-            cout << "all lines raw: "<<all_lines_raw.rows()<<", "<< all_lines_raw.cols()<<endl;
+            cout << "all lines raw: "<<all_lines_raw[_id].rows()<<", "<< all_lines_raw[_id].cols()<<endl;
             #endif
             std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
-            detect_cuboid_obj.detect_cuboid(img_raw, transToWolrd.cast<double>(), obj_bbox_coors, all_lines_raw, all_object_cuboids,anchor_objects);
+            detect_cuboid_obj.detect_cuboid(img_raw, transToWolrd.cast<double>(), obj_bbox_coors, all_lines_raw[_id], all_object_cuboids,anchor_objects);
             std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
             double ttrack= std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
             #ifdef VERBOSE
@@ -470,19 +505,19 @@ class Box_handler{
 
             return_pose.id = msg->id;
             #ifdef VERBOSE
-            cout << "pose rotation size: "<<pose.Rotation.size()<<endl;
+            cout << "pose rotation size: "<<pose[_id].Rotation.size()<<endl;
             #endif
             for(int i=0; i<9; ++i)
             {
-                return_pose.rot.push_back(pose.rot_tcw.at(i));
+                return_pose.rot.push_back(pose[_id].rot_tcw.at(i));
             }
 
             #ifdef VERBOSE
-            cout << "pose Transition size: "<<pose.Trans.size()<<endl;
+            cout << "pose Transition size: "<<pose[_id].Trans.size()<<endl;
             #endif
             for(int i=0; i<3; ++i)
             {
-                return_pose.trans.push_back(pose.trans_tcw.at(i));
+                return_pose.trans.push_back(pose[_id].trans_tcw.at(i));
             }
 
             // return_pose.count = all_object_cuboids.size();
@@ -597,30 +632,6 @@ class Box_handler{
             // }
 */  
         }
-
-        void edgeCallback(const line_lbd::Keyline_vec::ConstPtr& msg)
-        {
-            all_lines_raw = Eigen::MatrixXd(100,4);
-            line_lbd::Keyline tmp;
-            int row_counter = 0;
-            for(int i=0;i<msg->length;++i)
-            {
-                tmp = msg->Keylines[i];
-                all_lines_raw(i,0) = tmp.startPointX;
-                all_lines_raw(i,1) = tmp.startPointY;
-                all_lines_raw(i,2) = tmp.endPointX;
-                all_lines_raw(i,3) = tmp.endPointY;
-                row_counter++;
-                if (i >= all_lines_raw.rows()) // if matrix row is not enough, make more space.
-                        all_lines_raw.conservativeResize(all_lines_raw.rows() * 2, all_lines_raw.cols());
-            }
-            #ifdef VERBOSE
-            cout << "edge detected!!!"<<endl;
-            #endif
-            all_lines_raw.conservativeResize(row_counter, all_lines_raw.cols());
-            has_edge = true;  
-        }
-
 
 };
 
