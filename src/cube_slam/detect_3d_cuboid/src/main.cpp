@@ -142,7 +142,7 @@ class Box_handler{
         map<string, bool> has_edge; // viewer
         map<string, bool> has_pose; // viewer
         bool has_image = false;
-        map<string, bool> initial; // viewer
+        bool initial = false; // host
 
         map<string, line_lbd::my_pose> current_pose; // viewer
         map<string, line_lbd::my_pose> pose; // viewer
@@ -158,8 +158,6 @@ class Box_handler{
 */
     public:
         Box_handler(){
-            has_edge["0"], has_pose["0"], initial["0"] = false, false, false;
-            all_lines_raw["0"] = Eigen::MatrixXd(100,4);
             image_transport::ImageTransport it(nh);
             final_pub = nh.advertise<line_lbd::final_pose>("/final_pose",1);
             anchor_pub = nh.advertise<line_lbd::anchor_objects>("/anchor_objects",1);
@@ -251,12 +249,13 @@ class Box_handler{
             #endif
             if(has_pose.size() > 50) return;
             string _id = msg->id;
+            current_pose[_id] = line_lbd::my_pose();
             current_pose[_id].Rotation=msg->Rotation;
             current_pose[_id].Trans=msg->Trans;
             current_pose[_id].rot_tcw = msg->rot_tcw;
             current_pose[_id].trans_tcw = msg->trans_tcw;
             has_pose[_id] = true;
-            initial[_id] = true;
+            initial = true;
         }
 
         void edgeCallback(const line_lbd::Keyline_vec::ConstPtr& msg)
@@ -290,16 +289,14 @@ class Box_handler{
             string _id = msg->id;
             #ifdef VERBOSE
             // If _id can be found in has_pose, then print has_pose[_id]
-            cout << "boxCallback has_pose: "<< (has_pose.find(_id) != has_pose.end())?has_pose[_id]:false <<endl;
+            cout << "boxCallback has_pose: "<< ((has_pose.find(_id) != has_pose.end())?has_pose[_id]:false) <<endl;
             #endif
 
             // Short circuit evaluation: if lhs is true, rhs will not be checked.
             // If _id can be found in has_edge(lhs is false), it will check if has_edge[_id] is true
             // Theoretically, if there is record in has_edge, it should be true
             // Same rules are apply to initial. If neither has_edge nor initial are true, then return
-            if(has_edge.find(_id) == has_edge.end() || !has_edge[_id]){
-                if(initial.find(_id) == initial.end() || !initial[_id]) return;
-            }
+            if(has_edge.find(_id) == has_edge.end() || !has_edge[_id] || !initial) return;
             
             cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_now, sensor_msgs::image_encodings::RGB8);
             cv::Mat img_raw = cv_ptr->image.clone();
@@ -504,20 +501,35 @@ class Box_handler{
             #endif
 
             return_pose.id = msg->id;
-            #ifdef VERBOSE
-            cout << "pose rotation size: "<<pose[_id].Rotation.size()<<endl;
-            #endif
-            for(int i=0; i<9; ++i)
-            {
-                return_pose.rot.push_back(pose[_id].rot_tcw.at(i));
-            }
+            if(has_pose.find(_id) != has_pose.end() && has_pose[_id]){
+                #ifdef VERBOSE
+                cout << "pose rotation size: "<<pose[_id].Rotation.size()<<endl;
+                #endif
+                for(int i=0; i<9; ++i)
+                {
+                    return_pose.rot.push_back(pose[_id].rot_tcw.at(i));
+                }
 
-            #ifdef VERBOSE
-            cout << "pose Transition size: "<<pose[_id].Trans.size()<<endl;
-            #endif
-            for(int i=0; i<3; ++i)
-            {
-                return_pose.trans.push_back(pose[_id].trans_tcw.at(i));
+                #ifdef VERBOSE
+                cout << "pose Transition size: "<<pose[_id].Trans.size()<<endl;
+                #endif
+                for(int i=0; i<3; ++i)
+                {
+                    return_pose.trans.push_back(pose[_id].trans_tcw.at(i));
+                }
+            }
+            else{
+                #ifdef VERBOSE
+                cout << "not tracking, use host pose instead" <<endl;
+                #endif
+                for(int i=0; i<9; ++i)
+                {
+                    return_pose.rot.push_back(pose["0"].rot_tcw.at(i));
+                }
+                for(int i=0; i<3; ++i)
+                {
+                    return_pose.trans.push_back(pose["0"].trans_tcw.at(i));
+                }
             }
 
             // return_pose.count = all_object_cuboids.size();
