@@ -66,6 +66,12 @@ target_link_libraries(Exp
 ${LIBS}
 )
 
+add_message_files(FILES
+Tracking_status.msg
+)
+
+generate_messages()
+
 # Node for monocular camera
 rosbuild_add_executable(Mono
 src/ros_mono.cc

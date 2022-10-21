@@ -31,6 +31,7 @@
 
 #include "../../../include/System.h"
 #include <ctime>
+#include <ORB_SLAM2/Tracking_status.h>
 #include </home/brian/catkin_ws/devel/include/line_lbd/my_pose.h>
 #include </home/brian/catkin_ws/devel/include/line_lbd/My_image.h>
 #include </home/brian/catkin_ws/devel/include/line_lbd/my_mat.h>
@@ -53,11 +54,13 @@ class ImageGrabber
 {
 public:
 
-    ImageGrabber(ORB_SLAM2::System* pSLAM, ros::Publisher *pub,ros::Publisher *ppub):mpSLAM(pSLAM),pose_pub_(pub),pose_update_pub_(ppub){}
+    ImageGrabber(ORB_SLAM2::System* pSLAM, ros::Publisher *pub1,ros::Publisher *pub2, ros::Publisher *pub3):
+    mpSLAM(pSLAM),pose_pub_(pub1),pose_update_pub_(pub2), pose_tracking_status_pub(pub3){}
     
     void GrabImage(const line_lbd::My_image::ConstPtr& msg);
     bool has_send_initial = false;
     ORB_SLAM2::System* mpSLAM;
+    ros::Publisher* pose_tracking_status_pub;
     ros::Publisher* pose_pub_;
     ros::Publisher* pose_update_pub_;
 
@@ -65,9 +68,7 @@ public:
     {
         cout << "ORB SLAM get bounding box"<<endl;
 
-        
         // const std::lock_guard<std::mutex> lock(mutex_image);
-
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_now, sensor_msgs::image_encodings::RGB8);
 
         // IRL: will convert to gray image on tracking thread
@@ -96,14 +97,8 @@ public:
             tmp.push_back(msg->bounding_boxes[i].ymin);
             tmp.push_back(msg->bounding_boxes[i].ymax);
 
-            if(is_dynamic(msg->bounding_boxes[i].Class)){
-                dynamic_pos.push_back(tmp);
-
-            }
-            
-            if(is_anchor(msg->bounding_boxes[i].Class)){
-                anchor_pos.push_back(tmp);
-            }
+            if(is_dynamic(msg->bounding_boxes[i].Class)) dynamic_pos.push_back(tmp);
+            if(is_anchor(msg->bounding_boxes[i].Class)) anchor_pos.push_back(tmp);
         
         }
         cout << "orb_slam time: "<< cv_ptr->header.stamp.toSec() << endl;
@@ -122,7 +117,7 @@ public:
         #else
                 std::chrono::monotonic_clock::time_point t2 = std::chrono::monotonic_clock::now();
         #endif
-
+/*
         // double ttrack= std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
         // times+=ttrack;
         // nums+=1;
@@ -142,6 +137,12 @@ public:
     //         mpSystem->ids.push_back(kk->IRL_id);
     //         mpSystem->poses.push_back(kk->GetPose());
     //     }
+*/
+
+        ORB_SLAM2::Tracking_status return_tracking_status;
+        return_tracking_status.id = msg->id;
+        return_tracking_status.tracking_status = to_string(mpSLAM->GetTrackingState());
+        pose_tracking_status_pub->publish(return_tracking_status);
 
         if(mpSLAM->GetTrackingState()==1) return;
         if(Tcw.rows!=4 && Tcw.cols!=4) return;
@@ -151,10 +152,7 @@ public:
         // cout << "ORB-SLAM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"<<mpSLAM->ids.size()<<endl;
         
         for(int i =0;i<3;i++){
-            for(int j=0;j<3;j++)
-            {
-                updated_pose.rot.push_back(Tcw.at<float>(i,j));
-            }
+            for(int j=0;j<3;j++) updated_pose.rot.push_back(Tcw.at<float>(i,j));
         }
 
         updated_pose.trans.push_back(Tcw.at<float>(0,3));
@@ -169,10 +167,7 @@ public:
         //TODO test whether transpose
 
         for(int i =0;i<3;i++){
-            for(int j=0;j<3;j++)
-            {
-                pose.rot_tcw.push_back(Tcw.at<float>(i,j));
-            }
+            for(int j=0;j<3;j++) pose.rot_tcw.push_back(Tcw.at<float>(i,j));
         }
 
         pose.trans_tcw.push_back(Tcw.at<float>(0,3));
@@ -198,14 +193,9 @@ public:
         cv::Mat Rwc = Twc.rowRange(0,3).colRange(0,3);
         cv::Mat twc = Twc.rowRange(0,3).col(3);
         for(int i =0;i<3;i++){
-            for(int j=0;j<3;j++)
-            {
-                pose.Rotation.push_back(Rwc.at<float>(i,j));
-            }
+            for(int j=0;j<3;j++) pose.Rotation.push_back(Rwc.at<float>(i,j));
         }
 
-
-        
         pose.Trans.push_back(twc.at<float>(0));
         pose.Trans.push_back(twc.at<float>(1));
         pose.Trans.push_back(twc.at<float>(2));
@@ -217,8 +207,6 @@ public:
             pose.id = "reloc";
             pose_pub_->publish(pose);
         }
-        
-
     }
 
     bool is_dynamic(const string Class)
@@ -258,11 +246,12 @@ int main(int argc, char **argv)
         return 1;
     }    
     ros::Publisher pose_pub = nh.advertise<line_lbd::my_pose>("/SLAM_pose",10);
-    ros::Publisher pose_update_pub = nh.advertise<line_lbd::updateServer>("/update_pose_python",10);  
+    ros::Publisher pose_update_pub = nh.advertise<line_lbd::updateServer>("/update_pose_python",10);
+    ros::Publisher pose_tracking_status_pub = nh.advertise<ORB_SLAM2::Tracking_status>("/slam_track", 1);
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
     ORB_SLAM2::System SLAM(argv[1],argv[2],ORB_SLAM2::System::MONOCULAR,true);
     SLAM.IRL_SLAM = true;
-    ImageGrabber igb(&SLAM, &pose_pub, &pose_update_pub);
+    ImageGrabber igb(&SLAM, &pose_pub, &pose_update_pub, &pose_tracking_status_pub);
 
     ros::NodeHandle nodeHandler;
     ros::Subscriber sub = nodeHandler.subscribe("/my_bounding_boxes",1, &ImageGrabber::boxCallback, &igb);
@@ -288,6 +277,7 @@ void ImageGrabber::GrabImage(const line_lbd::My_image::ConstPtr& msg)
     cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_now, sensor_msgs::image_encodings::RGB8);
 
     cv::Mat img_raw = cv_ptr->image.clone();
+/*
     // cv::Mat img_raw = cv_ptr->image.clone();
     // Copy the ros image message to cv::Mat.
     // cv_bridge::CvImageConstPtr cv_ptr;
@@ -301,13 +291,14 @@ void ImageGrabber::GrabImage(const line_lbd::My_image::ConstPtr& msg)
     //     ROS_ERROR("cv_bridge exception: %s", e.what());
     //     return;
     // }
+*/
     clock_t start,stop;
     start = clock();
     mpSLAM->current_id = stol(msg->id, nullptr, 10);
     cv::Mat Tcw = mpSLAM->TrackMonocular(img_raw,cv_ptr->header.stamp.toSec());
     stop = clock();
     cout << "time of slam for one frame: "<<double(stop-start)/CLOCKS_PER_SEC <<endl;
-
+/*
     // if(mpSLAM->has_initial && !has_send_initial){
     //     has_send_initial =true;
     //     line_lbd::updateServer updated_initial_pose;
@@ -347,7 +338,7 @@ void ImageGrabber::GrabImage(const line_lbd::My_image::ConstPtr& msg)
     //         mpSystem->ids.push_back(kk->IRL_id);
     //         mpSystem->poses.push_back(kk->GetPose());
     //     }
-
+*/
 
     if(Tcw.rows!=4 && Tcw.cols!=4) return; 
     line_lbd::my_pose pose;
