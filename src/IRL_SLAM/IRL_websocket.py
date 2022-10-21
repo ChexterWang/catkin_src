@@ -115,7 +115,7 @@ class Client_Server:
                 self.set_host_done = True
         
         if(id_ in self.has_viewer and self.has_viewer[id_]):
-            self.pose[id_] = self.VO.scene_check(total_data_tmp)
+            self.pose[id_] = self.VO.scene_check(total_data_tmp, id_)
             if(len(self.pose[id_])!=0):
                 print(f"viewer (id:{id_}) done")
                 ''' depth
@@ -171,7 +171,26 @@ def parse(data):
     tmp = data.find("_")
     placeVO = data[0:tmp]
     # print("==============================={}=============".format(placeVO))
-    image_raw = data[tmp+1:].strip()
+    data = data[tmp+1:].strip()
+    tmp = data.find("_")
+    image_raw = data[0:tmp]
+
+    # give Kalib for the first time
+    if(len(data) > 0):
+        data = data[tmp+1:].strip()
+        tmp = data.find("_")
+        Kalibdata = data[0:tmp]
+        fx, fy, cx, cy = Kalibdata.split(",")
+        fx, fy, cx, cy = float(fx), float(fy), float(cx), float(cy)
+        Kalib = np.zeros((3, 3))
+        Kalib[0,0] = fx
+        Kalib[0,2] = cx
+        Kalib[1,1] = fy
+        Kalib[1,2] = cy
+        Kalib[2,2] = 1
+        VA.Kablib[int(device_id)] = Kalib
+        # TODO: add device_id in function arg (used in VA) 
+
     frame = bytes(image_raw,'utf-8')
     frame = base64.decodebytes(frame)
     frame = np.frombuffer(frame, np.int8)
