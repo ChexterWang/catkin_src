@@ -23,19 +23,6 @@ import Virtual_Angle as VA
 from Util import Util
 
 util = Util()
-
-def write2file(filepath, str):
-    # with open(filepath, 'a') as f:
-    #     f.write(str)
-    # f.close()
-    util.write2file(filepath, str)
-
-# wsSend = lambda ws, msg: ws.send(json.dumps(msg))
-# wsPub = lambda ws, topic, data: wsSend(ws, {'op':'publish', 'topic':topic, 'msg':{'data':data}})
-
-wsSend = lambda ws, msg: util.wsSend(ws, msg)
-wsPub = lambda ws, topic, data: wsSend(ws, {'op':'publish', 'topic':topic, 'msg':{'data':data}})
-
 br = CvBridge()
 
 class Client_Server:
@@ -123,7 +110,7 @@ class Client_Server:
             self.host_depth = depth_image.copy()
             # print(depth_image.shape)
             if(host_num>1):
-                write2file(self.file, f"host num: {host_num}, depth: 1.0\n")
+                util.write2file(self.file, f"host num: {host_num}, depth: 1.0\n")
                 self.has_host = False
                 self.set_host_done = True
         
@@ -149,7 +136,7 @@ class Client_Server:
                 # # if(self.viewer_depth<=1):
                 # #     self.viewer_depth = 1.2
                 # # self.viewer_pose = f"viewer_done,{pose[0]:.4f},{pose[1]:.4f},{self.viewer_depth:.4f}"
-                # write2file(self.file, f"pose: {pose[0]:.4f}, {pose[1]:.4f}, depth ratio: {self.viewer_depth:.4f}, angle: {self.VO.sm_angle}\n")
+                # util.write2file(self.file, f"pose: {pose[0]:.4f}, {pose[1]:.4f}, depth ratio: {self.viewer_depth:.4f}, angle: {self.VO.sm_angle}\n")
                 '''
                 self.viewer_pose[device_id] = f"viewer_done,{self.pose[device_id][0]},{self.pose[device_id][1]},{self.VO.sm_angle:.0f},{device_id}"
                 self.set_viewer_done[device_id] = True
@@ -224,13 +211,13 @@ async def main_loop():
         save_image = False
         topic = "/IRL_SLAM"
         server = Client_Server(topic)
-        await wsSend(websocket, {
+        await util.wsSend(websocket, {
             'op':'advertise',
             'topic':topic,
             'type':'std_msgs/String'
         })
 
-        await wsSend(websocket, {
+        await util.wsSend(websocket, {
             'op':'subscribe',
             'id': str(uuid4()),
             'topic':'/chatter',
@@ -243,12 +230,12 @@ async def main_loop():
                 # if(server.relocalize):
                     # server.has_pose = False
                     # print(server.pose_now)
-                    # await wsPub(websocket, topic, "relocalize")
+                    # await util.wsPub(websocket, topic, "relocalize")
 
                 if(server.has_initialize):
                     # server.has_pose = False
                     # print(server.pose_now)
-                    await wsPub(websocket, topic, "initialize")
+                    await util.wsPub(websocket, topic, "initialize")
                     server.has_initialize_send = True
                     server.has_initialize = False
                 
@@ -256,7 +243,7 @@ async def main_loop():
                     # print("send update !!!!!!!!!!!!!!!!!")
                     server.has_update = False
                     # print("++++++++++++++++++++++++",server.update_now)
-                    await wsPub(websocket, topic, server.update_now)
+                    await util.wsPub(websocket, topic, server.update_now)
                 
                 # print("++++++++++++++++++++++++",server.update_now)
                 json_message = await websocket.recv()
@@ -284,13 +271,13 @@ async def main_loop():
                         # assign id to device
                         if(int(device_id_now) < 0):
                             print(f"assign id {server.assigned_id_now} to device")
-                            await wsPub(websocket, topic, f"id,{server.assigned_id_now}")
+                            await util.wsPub(websocket, topic, f"id,{server.assigned_id_now}")
                             server.assigned_id_now += 1
                         
                     if(place_now == "viewer"):
                         if(not server.relocalize):
                             print(f"no host, relocalize")
-                            await wsPub(websocket, topic, f"relocalize")
+                            await util.wsPub(websocket, topic, f"relocalize")
                         else:
                             if(int(device_id_now) > 0):
                                 server.has_viewer[device_id_now] = True
@@ -301,18 +288,18 @@ async def main_loop():
                         server.set_viewer_done[device_id_now] = False
                         # server.has_pose = False
                         # print(server.pose_now)
-                        await wsPub(websocket, topic, server.viewer_pose[device_id_now])
+                        await util.wsPub(websocket, topic, server.viewer_pose[device_id_now])
                        
                     if(place_now == "host"):
                         # if(server.relocalize):
                         #     print(f"has_host, relocalize")
-                        #     await wsPub(websocket, topic, "relocalize")
+                        #     await util.wsPub(websocket, topic, "relocalize")
                         server.has_host = True
 
                     if(server.set_host_done):
                         # server.has_pose = False
                         # print(server.pose_now)
-                        await wsPub(websocket, topic, "host_set")
+                        await util.wsPub(websocket, topic, "host_set")
                         server.set_host_done = False
                         server.relocalize = True
                         

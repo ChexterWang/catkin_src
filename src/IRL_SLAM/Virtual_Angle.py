@@ -6,16 +6,6 @@ from Util import Util
 
 util = Util()
 
-# limitInterval = lambda u, a, b: b if u > b else a if u < a else u
-limitInterval = lambda u, a, b: util.limitInterval(u, a, b)
-
-def write2file(filepath, str):
-    # with open(filepath, 'a') as f:
-    #     f.write(str)
-    # f.close()
-    util.write2file(filepath, str)
-
-
 class Virtual_Angle:
     def __init__(self,save_image,save_log):
 
@@ -404,8 +394,8 @@ class Virtual_Angle:
                                 v = tmp[1]
                                 if(name!=anchor_name and abs(angle)>10): 
                                     u += angle
-                                u = limitInterval(u, 0, 640)
-                                v = limitInterval(v, 0, 480)
+                                u = util.limitInterval(u, 0, 640)
+                                v = util.limitInterval(v, 0, 480)
                                 points[point] = np.array([u,v])
                         
                             # cv2.circle(image,p, 5,colors[i] , 3)
@@ -463,7 +453,7 @@ class Virtual_Angle:
             select_u_score = 300 if select_u_score == np.inf else select_u_score
             select_v_score = 300 if select_v_score == np.inf else select_v_score
             print(f"[virtual_angle/scene_check] score({select_u_score:.0f}, {select_v_score:.0f}) too high, select angle({select_angle:.0f})", end='\r',flush=True)
-            write2file("/home/brian/catkin_ws/src/IRL_SLAM/log.csv", f"{select_u_score:.0f}, {select_v_score:.0f}\n")
+            util.write2file("/home/brian/catkin_ws/src/IRL_SLAM/log.csv", f"{select_u_score:.0f}, {select_v_score:.0f}\n")
             return []
         # return False
         # print("smallest angle:",select_angle)
