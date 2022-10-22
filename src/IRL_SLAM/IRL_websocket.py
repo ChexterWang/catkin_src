@@ -16,17 +16,24 @@ from line_lbd.msg import final_pose
 from line_lbd.msg import combined_boxes
 from line_lbd.msg import My_image
 from line_lbd.msg import updateServer
-
+from ORB_SLAM2.msg import Tracking_status
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import Virtual_Angle as VA
+from Util import Util
+
+util = Util()
 
 def write2file(filepath, str):
-    with open(filepath, 'a') as f:
-        f.write(str)
-    f.close()
+    # with open(filepath, 'a') as f:
+    #     f.write(str)
+    # f.close()
+    util.write2file(filepath, str)
 
-wsSend = lambda ws, msg: ws.send(json.dumps(msg))
+# wsSend = lambda ws, msg: ws.send(json.dumps(msg))
+# wsPub = lambda ws, topic, data: wsSend(ws, {'op':'publish', 'topic':topic, 'msg':{'data':data}})
+
+wsSend = lambda ws, msg: util.wsSend(ws, msg)
 wsPub = lambda ws, topic, data: wsSend(ws, {'op':'publish', 'topic':topic, 'msg':{'data':data}})
 
 br = CvBridge()
@@ -35,6 +42,7 @@ class Client_Server:
     def __init__(self, topic):
         self.sub = rospy.Subscriber("/final_pose", final_pose, self.return_callback)
         self.update_sub = rospy.Subscriber("/update_pose_python", updateServer, self.update_callback)
+        self.tracking_status_sub = rospy.Subscriber("/slam_track", Tracking_status, self.tracking_status_callback)
         self.net = Depth(640,480)
         self.topic = topic
         self.has_pose = False
@@ -53,10 +61,15 @@ class Client_Server:
         self.set_viewer_done = {}
         self.viewer_pose = {}
         self.pose = {}
+        self.tracking_status = {}
         self.has_initialize = False
         self.has_initialize_send = False
         self.relocalize = False
         self.assigned_id_now = 0
+
+    def tracking_status_callback(self, data):
+        device_id = data.id
+        self.tracking_status[device_id] = data.tracking_status
 
     def update_callback(self, data):
         # print("get update")
@@ -73,7 +86,7 @@ class Client_Server:
         self.has_update = True
 
     def return_callback(self,data):
-        id_ = data.id
+        device_id = data.id
         # self.relocalize = (id_=="reloc")
         Rot_tmp = data.rot
         Trans_tmp = data.trans
@@ -84,8 +97,8 @@ class Client_Server:
         # boxes_3d = data.boxes_3d 
         Rot = self.parse_to_string(Rot_tmp)
         Trans = self.parse_to_string(Trans_tmp)
-        total_data = "BB_{}_[{}]_[{}]_{}".format(id_,Rot,Trans,count)
-        total_data_tmp = "BB_{}_[{}]_[{}]_{}".format(id_,Rot,Trans,count)
+        total_data = "BB_{}_[{}]_[{}]_{}".format(device_id,Rot,Trans,count)
+        total_data_tmp = "BB_{}_[{}]_[{}]_{}".format(device_id,Rot,Trans,count)
         
         if(count==0):
             total_data+="_"
@@ -102,7 +115,7 @@ class Client_Server:
         cv_image = br.imgmsg_to_cv2(data.image_now, "rgb8")
 
         if(self.has_host):
-            print(f"set host(id:{id_})")
+            print(f"set host(id:{device_id})")
             self.VO.set_host(total_data_tmp,(320,240),1.0,cv_image)
             cv_image = br.imgmsg_to_cv2(data.image_now, "rgb8")
             depth_image = self.net.depth_estimate(cv_image)
@@ -114,10 +127,11 @@ class Client_Server:
                 self.has_host = False
                 self.set_host_done = True
         
-        if(id_ in self.has_viewer and self.has_viewer[id_]):
-            self.pose[id_] = self.VO.scene_check(total_data_tmp)
-            if(len(self.pose[id_])!=0):
-                print(f"viewer (id:{id_}) done")
+        if(device_id in self.has_viewer and self.has_viewer[device_id]):
+            # assertion: device_id in self.tracking_status
+            self.pose[device_id] = self.VO.scene_check(total_data_tmp, device_id, self.tracking_status[device_id])
+            if(len(self.pose[device_id])!=0):
+                print(f"viewer (id:{device_id}) done")
                 ''' depth
                 # cv_image = br.imgmsg_to_cv2(data.image_now, "rgb8")
                 # depth_image = self.net.depth_estimate(cv_image)
@@ -137,9 +151,9 @@ class Client_Server:
                 # # self.viewer_pose = f"viewer_done,{pose[0]:.4f},{pose[1]:.4f},{self.viewer_depth:.4f}"
                 # write2file(self.file, f"pose: {pose[0]:.4f}, {pose[1]:.4f}, depth ratio: {self.viewer_depth:.4f}, angle: {self.VO.sm_angle}\n")
                 '''
-                self.viewer_pose[id_] = f"viewer_done,{self.pose[id_][0]},{self.pose[id_][1]},{self.VO.sm_angle:.0f},{id_}"
-                self.set_viewer_done[id_] = True
-                self.has_viewer[id_] = False
+                self.viewer_pose[device_id] = f"viewer_done,{self.pose[device_id][0]},{self.pose[device_id][1]},{self.VO.sm_angle:.0f},{device_id}"
+                self.set_viewer_done[device_id] = True
+                self.has_viewer[device_id] = False
 
         if(self.has_initialize_send==False):
             self.has_initialize = True
@@ -171,7 +185,26 @@ def parse(data):
     tmp = data.find("_")
     placeVO = data[0:tmp]
     # print("==============================={}=============".format(placeVO))
-    image_raw = data[tmp+1:].strip()
+    data = data[tmp+1:].strip()
+    tmp = data.find("_")
+    image_raw = data[0:tmp]
+
+    # give Kalib for the first time
+    if(len(data) > 0):
+        data = data[tmp+1:].strip()
+        tmp = data.find("_")
+        Kalibdata = data[0:tmp]
+        fx, fy, cx, cy = Kalibdata.split(",")
+        fx, fy, cx, cy = float(fx), float(fy), float(cx), float(cy)
+        Kalib = np.zeros((3, 3))
+        Kalib[0,0] = fx
+        Kalib[0,2] = cx
+        Kalib[1,1] = fy
+        Kalib[1,2] = cy
+        Kalib[2,2] = 1
+        VA.Kablib[int(device_id)] = Kalib
+        # TODO: add device_id in function arg (used in VA) 
+
     frame = bytes(image_raw,'utf-8')
     frame = base64.decodebytes(frame)
     frame = np.frombuffer(frame, np.int8)
