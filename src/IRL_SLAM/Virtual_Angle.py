@@ -2,33 +2,37 @@ import numpy as np
 from numpy.linalg import inv
 import cv2
 import math
+from Util import Util
 
-limitInterval = lambda u, a, b: b if u > b else a if u < a else u
+util = Util()
+
+# limitInterval = lambda u, a, b: b if u > b else a if u < a else u
+limitInterval = lambda u, a, b: util.limitInterval(u, a, b)
 
 def write2file(filepath, str):
-    with open(filepath, 'a') as f:
-        f.write(str)
-    f.close()
+    # with open(filepath, 'a') as f:
+    #     f.write(str)
+    # f.close()
+    util.write2file(filepath, str)
+
 
 class Virtual_Angle:
     def __init__(self,save_image,save_log):
+
+        '''
         # fx = 737.037
         # fy = 699.167
         # cx = 340.565
         # cy = 218.486
-
-        # to get new 
-        self.Kalib = {}
-
-
-
         # self.Kalib = np.zeros((3,3))
         # self.Kalib[0,0] = fx
         # self.Kalib[0,2] = cx
         # self.Kalib[1,1] = fy
         # self.Kalib[1,2] = cy
         # self.Kalib[2,2] = 1
-
+        '''
+        # to get new 
+        self.Kalib = {}
         self.colors = [(0, 0, 255),(0, 255, 0),(255, 0, 0),(255, 0, 255),(0, 255, 255),(255, 255, 255),(255,255,0),(0,0,0)]
         self.save_image = save_image
         self.save_log = save_log
@@ -111,16 +115,16 @@ class Virtual_Angle:
         image =  cv2.line(image,center,z,(0,255,0),3)
         return image
 
-    def Pixel2World(self,point, Rot, Trans, id):
+    def Pixel2World(self,point, Rot, Trans, device_id):
         # 從pixel的位置推回在world coordinate的座標
         # P_pixel = Kalib(Rot*Pw+Trans) => Pw = inv(K*Rot) (P_{pixel}-K*Trans)
-        KR_inv = inv(np.matmul(self.Kalib[id],Rot))
-        KT = np.matmul(self.Kalib[id],Trans)
+        KR_inv = inv(np.matmul(self.Kalib[device_id],Rot))
+        KT = np.matmul(self.Kalib[device_id],Trans)
         return np.matmul(KR_inv, point - KT)
 
-    def World2Pixel(self,point, Rot, Trans, id):
+    def World2Pixel(self,point, Rot, Trans, device_id):
         tmp = np.matmul(Rot,point)+Trans
-        return np.matmul(self.Kalib[id], tmp)
+        return np.matmul(self.Kalib[device_id], tmp)
 
     def DrawCircles(self,img, points, color, size):
         for point in range(8):
@@ -130,9 +134,9 @@ class Virtual_Angle:
             p = (int(u),int(v))
             cv2.circle(img, p, size ,color, 3)
 
-    def setAnchor(self,u,v, id):
+    def setAnchor(self,u,v, device_id):
         pixel = np.array([u,v,1])
-        Pc = np.matmul(inv(self.Kalib[id]),pixel)
+        Pc = np.matmul(inv(self.Kalib[device_id]),pixel)
         Rot = np.eye(3, dtype=np.float64)
         return Rot, -Pc
 
@@ -356,11 +360,14 @@ class Virtual_Angle:
         return u_score<=0 and v_score<=0
         return True
 
-    def scene_check(self,data, id):
+    def scene_check(self,data, device_id, tracking_status):
         # print(f"[virtual_angle/scene_check] start")
         self.parse(data)
         if(not self.check_view()): 
             return []
+
+        if(util.orb_tracking_status[tracking_status] == 'OK'):
+            return self.SLAM_viewer(self.Tcw["Rot"],self.Tcw["Trans"], device_id)
 
         select_angle = 0
         smallest = np.inf
@@ -429,7 +436,7 @@ class Virtual_Angle:
         # print(f"smallest angle: {select_angle}", end='\r',flush=True)
         # print(f"smallest angle: {select_angle}")
         if(self.PlaceVO(select_u_score,select_v_score)):
-            new_position = self.VO_position(self.VO_world_place,select_T,select_transer, id)
+            new_position = self.VO_position(self.VO_world_place,select_T,select_transer, device_id)
             u = new_position[0]
             v = new_position[1]
             p = (int(u),int(v))
@@ -437,7 +444,7 @@ class Virtual_Angle:
             self.viewer_pixel[0] = int(u)
             self.viewer_pixel[1] = int(v)
 
-            world_p = np.matmul(inv(self.Kalib[id]),pixel_uv)
+            world_p = np.matmul(inv(self.Kalib[device_id]),pixel_uv)
             x_th = 0.3
             if(world_p[1]>0.1):
                 world_p[1] = 0.1
@@ -446,7 +453,7 @@ class Virtual_Angle:
             if(world_p[0]<-x_th):
                 world_p[0] = -x_th
             print(f"pixel in world: {world_p}")
-            slam_pixel = self.SLAM_viewer(self.Tcw["Rot"],self.Tcw["Trans"], id)
+            slam_pixel = self.SLAM_viewer(self.Tcw["Rot"],self.Tcw["Trans"], device_id)
             print(f"algo position: {p}, SLAM position: {slam_pixel}")
             print(f"score({select_u_score:.0f}, {select_v_score:.0f}), select angle({select_angle:.0f})")
             self.sm_angle = select_angle
@@ -461,12 +468,12 @@ class Virtual_Angle:
         # return False
         # print("smallest angle:",select_angle)
 
-    def SLAM_viewer(self,R,t, id):
+    def SLAM_viewer(self,R,t, device_id):
         new_place = np.ones((4,1))
         new_place[0:3,0] = self.VO_world_place
         T = np.eye(4,dtype=np.float64)
         T[0:3,0:3] = R
         T[0:3,3] = t
         tmp = np.matmul(T,new_place) 
-        pixel_raw = np.matmul(self.Kalib[id],tmp[0:3,0])
+        pixel_raw = np.matmul(self.Kalib[device_id],tmp[0:3,0])
         return (int(pixel_raw[0]/pixel_raw[2]),int(pixel_raw[1]/pixel_raw[2]))
