@@ -16,7 +16,11 @@ from line_lbd.msg import final_pose
 from line_lbd.msg import combined_boxes
 from line_lbd.msg import My_image
 from line_lbd.msg import updateServer
-from ORB_SLAM2.msg import Tracking_status
+# from ORB_SLAM2.msg import Tracking_status
+# from ORB_SLAM2.Examples.ROS.ORB_SLAM2.build.devel.lib.python3.dist-packages.ORB_SLAM2.msg import Tracking_status
+from sys import path
+path.insert(0, "/home/brian/catkin_ws/src/ORB_SLAM2/Examples/ROS/ORB_SLAM2/build/devel/lib/python3/dist-packages/ORB_SLAM2")
+from msg import Tracking_status
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import Virtual_Angle as VA
@@ -56,7 +60,8 @@ class Client_Server:
 
     def tracking_status_callback(self, data):
         device_id = data.id
-        self.tracking_status[device_id] = data.tracking_status
+        if(hasattr(self, 'tracking_status')):
+            self.tracking_status[device_id] = data.tracking_status
 
     def update_callback(self, data):
         # print("get update")
@@ -103,7 +108,7 @@ class Client_Server:
 
         if(self.has_host):
             print(f"set host(id:{device_id})")
-            self.VO.set_host(total_data_tmp,(320,240),1.0,cv_image)
+            self.VO.set_host(total_data_tmp,(320,240),1.0,cv_image,device_id)
             cv_image = br.imgmsg_to_cv2(data.image_now, "rgb8")
             depth_image = self.net.depth_estimate(cv_image)
             host_num = len(self.VO.host_classes)
@@ -175,23 +180,6 @@ def parse(data):
     data = data[tmp+1:].strip()
     tmp = data.find("_")
     image_raw = data[0:tmp]
-
-    # give Kalib for the first time
-    if(len(data) > 0):
-        data = data[tmp+1:].strip()
-        tmp = data.find("_")
-        Kalibdata = data[0:tmp]
-        fx, fy, cx, cy = Kalibdata.split(",")
-        fx, fy, cx, cy = float(fx), float(fy), float(cx), float(cy)
-        Kalib = np.zeros((3, 3))
-        Kalib[0,0] = fx
-        Kalib[0,2] = cx
-        Kalib[1,1] = fy
-        Kalib[1,2] = cy
-        Kalib[2,2] = 1
-        VA.Kablib[int(device_id)] = Kalib
-        # TODO: add device_id in function arg (used in VA) 
-
     frame = bytes(image_raw,'utf-8')
     frame = base64.decodebytes(frame)
     frame = np.frombuffer(frame, np.int8)
@@ -199,7 +187,22 @@ def parse(data):
     # frame = cv2.resize(frame,(640,480))
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     # mat = np.asarray(image_raw, dtype=np.uint8)
-    return device_id, id_, placeVO, frame        
+
+    Kalib = np.zeros((3, 3))
+    # give Kalib for the first time
+    if(len(data) > 0):
+        data = data[tmp+1:].strip('_').split(',')
+        if(len(data) == 4):
+            # print(data)
+            [fx, fy, cx, cy] = data
+            fx, fy, cx, cy = float(fx), float(fy), float(cx), float(cy)
+            Kalib[0,0] = fx
+            Kalib[0,2] = cx
+            Kalib[1,1] = fy
+            Kalib[1,2] = cy
+            Kalib[2,2] = 1
+        # TODO: add device_id in function arg (used in VA) 
+    return device_id, id_, placeVO, frame, Kalib
     # print 'Cols n Row ' + str(mat.shape[1]) + " " + str(mat.shape[0]
 
 async def main_loop():
@@ -253,7 +256,7 @@ async def main_loop():
                 
                 if(len(raw_data)!=0):
                     # print("publish image")
-                    device_id_now, id_now, place_now, image_now = parse(raw_data)
+                    device_id_now, id_now, place_now, image_now, Kalib = parse(raw_data)
                     ''' write raw data to file
                     # with open('/home/brian/ExcitedMail/output/raw_data.txt', 'a') as f:
                     #     f.write(raw_data)
@@ -270,6 +273,7 @@ async def main_loop():
                     if(place_now == "getId"):
                         # assign id to device
                         if(int(device_id_now) < 0):
+                            server.VO.Kalib[str(server.assigned_id_now)] = Kalib
                             print(f"assign id {server.assigned_id_now} to device")
                             await util.wsPub(websocket, topic, f"id,{server.assigned_id_now}")
                             server.assigned_id_now += 1

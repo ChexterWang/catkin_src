@@ -18,7 +18,7 @@ class Util:
             '2': 'OK',
             '3': 'LOST',
         }
-    def write2file(filepath, str):
+    def write2file(self, filepath, str):
         with open(filepath, 'a') as f:
             f.write(str)
         f.close()

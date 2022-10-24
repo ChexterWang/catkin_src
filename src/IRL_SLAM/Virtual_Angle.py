@@ -105,14 +105,14 @@ class Virtual_Angle:
         image =  cv2.line(image,center,z,(0,255,0),3)
         return image
 
-    def Pixel2World(self,point, Rot, Trans, device_id):
+    def Pixel2World(self,point,Rot,Trans,device_id):
         # 從pixel的位置推回在world coordinate的座標
         # P_pixel = Kalib(Rot*Pw+Trans) => Pw = inv(K*Rot) (P_{pixel}-K*Trans)
         KR_inv = inv(np.matmul(self.Kalib[device_id],Rot))
         KT = np.matmul(self.Kalib[device_id],Trans)
         return np.matmul(KR_inv, point - KT)
 
-    def World2Pixel(self,point, Rot, Trans, device_id):
+    def World2Pixel(self,point,Rot,Trans,device_id):
         tmp = np.matmul(Rot,point)+Trans
         return np.matmul(self.Kalib[device_id], tmp)
 
@@ -222,7 +222,7 @@ class Virtual_Angle:
         tmp = self.World2Pixel(position,T_W2VC[0:3,0:3],T_W2VC[0:3,3], device_id)
         return np.matmul(transfer,np.array([tmp[0]/tmp[2],tmp[1]/tmp[2]]))
         
-    def set_host(self,data,center,depth,image, device_id):
+    def set_host(self,data,center,depth,image,device_id):
         print(f"[virtual_angle/set_host] start")
         self.parse(data)
     
@@ -240,6 +240,7 @@ class Virtual_Angle:
         self.Pw = {} #key: object class; value: 3D bounding box corners in world coordinate
         
         self.numbers = self.Tcw["nums"]
+        self.host_classes = []
         for i in range(self.numbers):
             Pw_point = []
             name = self.Tcw[i]["class"]
