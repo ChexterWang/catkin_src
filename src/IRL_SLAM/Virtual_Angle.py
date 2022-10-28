@@ -4,12 +4,11 @@ import cv2
 import math
 from Util import Util
 
-util = Util()
+util = Util(verbose=False, log=False)
 
 class Virtual_Angle:
     def __init__(self,save_image,save_log):
-
-        '''
+        ''' old pixel 4 kalib
         # fx = 737.037
         # fy = 699.167
         # cx = 340.565
@@ -223,7 +222,6 @@ class Virtual_Angle:
         return np.matmul(transfer,np.array([tmp[0]/tmp[2],tmp[1]/tmp[2]]))
         
     def set_host(self,data,center,depth,image,device_id):
-        print(f"[virtual_angle/set_host] start")
         self.parse(data)
     
         self.world_anchor = self.World2Pixel(np.array([0,0,1]),self.Tcw["Rot"],self.Tcw["Trans"], device_id)
@@ -231,9 +229,9 @@ class Virtual_Angle:
         self.VO_world_place = self.Pixel2World(VO_initial_place, self.Tcw["Rot"], self.Tcw["Trans"], device_id)
         self.VO_world_place[2] = depth
         self.depth = depth
-        print("VO position: ", self.VO_world_place)
+        util.print(f"VO position: {self.VO_world_place}")
         self.center_world = self.VO_world_place
-        print("center",self.center_world)
+        util.print(f"center: {self.center_world}")
 
         self.T_AW = np.eye(4,dtype=np.float64)
         self.T_A2VC = np.eye(4,dtype=np.float64)
@@ -261,9 +259,17 @@ class Virtual_Angle:
 
         self.T_AW = np.matmul(T_C2A,T_World2Camera)
         self.host_numbers = self.Tcw["nums"]
-        print(self.host_classes)
+        util.print(self.host_classes)
         #construct angle dictionary
 
+        #===============================================================================
+        # structure of angle dict:
+
+        # angle_dict-> key: angle, value: dictionary of the angle
+        #     dictionary of the angle -> key: position, value: dictionary of bounding boxes position
+        #         dictionary of bounding boxes position -> key: class name, value: 8(corners)*3(u,v,1)
+        #     dictionary of the angle -> key: anchor, value: object closetest to the center
+        #===============================================================================
         for Set_Angle in self.angles:
             P_pixel = {}
             dict_tmp = {}
@@ -300,15 +306,9 @@ class Virtual_Angle:
                     c_u = int(c_u/8)
                     c_v = int(c_v/8)                 
             dict_tmp["depth_center"] = [c_u,c_v]
-            self.angle_dict[Set_Angle] = dict_tmp 
-        #===============================================================================
-        # structure of angle dict:
+            self.angle_dict[Set_Angle] = dict_tmp
+        print(f"[set_host] done")
 
-        # angle_dict-> key: angle, value: dictionary of the angle
-        #     dictionary of the angle -> key: position, value: dictionary of bounding boxes position
-        #         dictionary of bounding boxes position -> key: class name, value: 8(corners)*3(u,v,1)
-        #     dictionary of the angle -> key: anchor, value: object closetest to the center
-        #===============================================================================
 
     def check_view(self):
         # return True
@@ -317,7 +317,7 @@ class Virtual_Angle:
             if(self.Tcw[i]["class"] in self.host_classes):
                 match_class+=1
         if(match_class<2):
-            print(f"[virtual_angle/check_view] failed", end='\r',flush=True)
+            print(f"[check_view] failed", end='\r',flush=True)
             return False
         else:
             return True
@@ -352,7 +352,6 @@ class Virtual_Angle:
         return True
 
     def scene_check(self,data, device_id, tracking_status):
-        # print(f"[virtual_angle/scene_check] start")
         self.parse(data)
         if(not self.check_view()): 
             return []
@@ -443,18 +442,18 @@ class Virtual_Angle:
                 world_p[0] = x_th
             if(world_p[0]<-x_th):
                 world_p[0] = -x_th
-            print(f"pixel in world: {world_p}")
+            util.print(f"[scene_check] pixel in world: {world_p}")
             slam_pixel = self.SLAM_viewer(self.Tcw["Rot"],self.Tcw["Trans"], device_id)
-            print(f"algo position: {p}, SLAM position: {slam_pixel}")
-            print(f"score({select_u_score:.0f}, {select_v_score:.0f}), select angle({select_angle:.0f})")
+            util.print(f"[scene_check] algo position: {p}, SLAM position: {slam_pixel}")
+            print(f"[scene_check] score({select_u_score:.0f}, {select_v_score:.0f}), select angle({select_angle:.0f})")
             self.sm_angle = select_angle
             return pixel_uv
             return world_p
         else:
             select_u_score = 300 if select_u_score == np.inf else select_u_score
             select_v_score = 300 if select_v_score == np.inf else select_v_score
-            print(f"[virtual_angle/scene_check] score({select_u_score:.0f}, {select_v_score:.0f}) too high, select angle({select_angle:.0f})", end='\r',flush=True)
-            util.write2file("/home/brian/catkin_ws/src/IRL_SLAM/log.csv", f"{select_u_score:.0f}, {select_v_score:.0f}\n")
+            print(f"[scene_check] score({select_u_score:.0f}, {select_v_score:.0f}) too high, select angle({select_angle:.0f})", end='\r',flush=True)
+            util.log("/home/brian/catkin_ws/src/IRL_SLAM/log.csv", f"{select_u_score:.0f}, {select_v_score:.0f}\n")
             return []
         # return False
         # print("smallest angle:",select_angle)

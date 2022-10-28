@@ -1,7 +1,10 @@
 import json
 
 class Util:
-    def __init__(self) -> None:
+
+    def __init__(self, verbose=False, log=False) -> None:
+        self.verbose = verbose
+        self.save_log = log
         self.limitInterval = lambda u, a, b: b if u > b else a if u < a else u
         self.wsSend = lambda ws, msg: ws.send(json.dumps(msg))
         self.wsPub = lambda ws, topic, data: self.wsSend(ws, {
@@ -18,7 +21,13 @@ class Util:
             '2': 'OK',
             '3': 'LOST',
         }
-    def write2file(self, filepath, str):
-        with open(filepath, 'a') as f:
-            f.write(str)
-        f.close()
+
+    def log(self, filepath, str):
+        if(self.save_log):
+            with open(filepath, 'a') as f:
+                f.write(str)
+            f.close()
+
+    def print(self, str):
+        if(self.verbose):
+            print(str)

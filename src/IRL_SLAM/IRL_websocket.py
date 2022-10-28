@@ -26,7 +26,7 @@ from cv_bridge import CvBridge
 import Virtual_Angle as VA
 from Util import Util
 
-util = Util()
+util = Util(verbose=True, log=False)
 br = CvBridge()
 
 class Client_Server:
@@ -107,7 +107,7 @@ class Client_Server:
         cv_image = br.imgmsg_to_cv2(data.image_now, "rgb8")
 
         if(self.has_host):
-            print(f"set host(id:{device_id})")
+            print(f"[set_host] start (id:{device_id})")
             self.VO.set_host(total_data_tmp,(320,240),1.0,cv_image,device_id)
             cv_image = br.imgmsg_to_cv2(data.image_now, "rgb8")
             depth_image = self.net.depth_estimate(cv_image)
@@ -115,15 +115,19 @@ class Client_Server:
             self.host_depth = depth_image.copy()
             # print(depth_image.shape)
             if(host_num>1):
-                util.write2file(self.file, f"host num: {host_num}, depth: 1.0\n")
+                util.log(self.file, f"host num: {host_num}, depth: 1.0\n")
                 self.has_host = False
                 self.set_host_done = True
         
         if(device_id in self.has_viewer and self.has_viewer[device_id]):
             # assertion: device_id in self.tracking_status
-            self.pose[device_id] = self.VO.scene_check(total_data_tmp, device_id, self.tracking_status[device_id])
+            if(device_id in self.tracking_status):
+                self.pose[device_id] = self.VO.scene_check(total_data_tmp, device_id, self.tracking_status[device_id])
+            else:
+                util.print(f"[scene_check] device_id not in tracking_status, use 'Lost' instead")
+                self.pose[device_id] = self.VO.scene_check(total_data_tmp, device_id, '3')
             if(len(self.pose[device_id])!=0):
-                print(f"viewer (id:{device_id}) done")
+                print(f"[scene_check] viewer (id:{device_id}) done")
                 ''' depth
                 # cv_image = br.imgmsg_to_cv2(data.image_now, "rgb8")
                 # depth_image = self.net.depth_estimate(cv_image)
@@ -141,7 +145,7 @@ class Client_Server:
                 # # if(self.viewer_depth<=1):
                 # #     self.viewer_depth = 1.2
                 # # self.viewer_pose = f"viewer_done,{pose[0]:.4f},{pose[1]:.4f},{self.viewer_depth:.4f}"
-                # util.write2file(self.file, f"pose: {pose[0]:.4f}, {pose[1]:.4f}, depth ratio: {self.viewer_depth:.4f}, angle: {self.VO.sm_angle}\n")
+                # util.log(self.file, f"pose: {pose[0]:.4f}, {pose[1]:.4f}, depth ratio: {self.viewer_depth:.4f}, angle: {self.VO.sm_angle}\n")
                 '''
                 self.viewer_pose[device_id] = f"viewer_done,{self.pose[device_id][0]},{self.pose[device_id][1]},{self.VO.sm_angle:.0f},{device_id}"
                 self.set_viewer_done[device_id] = True
@@ -228,6 +232,8 @@ async def main_loop():
             'queue_length':5
         })
 
+        print(f"[System] Ready")
+
         while True:
             try:
                 # if(server.relocalize):
@@ -238,6 +244,7 @@ async def main_loop():
                 if(server.has_initialize):
                     # server.has_pose = False
                     # print(server.pose_now)
+                    print(f"[initialize] SLAM initialized")
                     await util.wsPub(websocket, topic, "initialize")
                     server.has_initialize_send = True
                     server.has_initialize = False
@@ -274,21 +281,21 @@ async def main_loop():
                         # assign id to device
                         if(int(device_id_now) < 0):
                             server.VO.Kalib[str(server.assigned_id_now)] = Kalib
-                            print(f"assign id {server.assigned_id_now} to device")
+                            print(f"[getId] assign id {server.assigned_id_now} to device")
                             await util.wsPub(websocket, topic, f"id,{server.assigned_id_now}")
                             server.assigned_id_now += 1
                         
                     if(place_now == "viewer"):
                         if(not server.relocalize):
-                            print(f"no host, relocalize")
+                            print(f"[retrieve] no host, send relocalize msg")
                             await util.wsPub(websocket, topic, f"relocalize")
                         else:
                             if(int(device_id_now) > 0):
                                 server.has_viewer[device_id_now] = True
-                                print(f"scene_check start for id {device_id_now}")
+                                print(f"[scene_check] start for id {device_id_now}")
 
                     if(device_id_now in server.set_viewer_done and server.set_viewer_done[device_id_now]):
-                        print(f"{server.viewer_pose[device_id_now]}")
+                        print(f"[scene_check] {server.viewer_pose[device_id_now]}")
                         server.set_viewer_done[device_id_now] = False
                         # server.has_pose = False
                         # print(server.pose_now)
@@ -315,16 +322,16 @@ async def main_loop():
                     pub.publish(msg)
                     my_pub.publish(My_msg)
             except websockets.ConnectionClosed as e:
-                print(f"connection closed, {e}")
+                print(f"[error] connection closed, {e}")
                 return
             except TypeError as e:
-                print(f"type error, {e}")
+                print(f"[error] type error, {e}")
                 return
             except KeyError as e:
-                print(f"index error, {e}")
+                print(f"[error] index error, {e}")
                 return
             except Exception as e:
-                print("connected loss", e)
+                print("[error] connected loss", e)
                 return
 
 if __name__ == '__main__':
