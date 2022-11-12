@@ -25,8 +25,9 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import Virtual_Angle as VA
 from Util import Util
+from pprint import pformat
 
-util = Util(verbose=True, log=False)
+util = Util(verbose=False, log=True)
 br = CvBridge()
 
 class Client_Server:
@@ -42,7 +43,7 @@ class Client_Server:
         self.update_now = ""
         self.pose_now = ""
         self.save_ids = []
-        self.file = "/home/brian/Documents/experiment/pose.txt"
+        self.file = "/home/brian/catkin_ws/src/IRL_SLAM/raw_data_seq.csv"
         self.experiment = ""
         self.host_frame_id = 0
         self.save_id = 0
@@ -57,6 +58,9 @@ class Client_Server:
         self.has_initialize_send = False
         self.relocalize = False
         self.assigned_id_now = 0
+        with open("/home/brian/catkin_ws/src/IRL_SLAM/raw_data_seq.csv", 'w') as f:
+            f.write(f'frame_no,device_no,msg,enc_img,raw_kalib\n')
+        f.close()
 
     def tracking_status_callback(self, data):
         device_id = data.id
@@ -115,7 +119,7 @@ class Client_Server:
             self.host_depth = depth_image.copy()
             # print(depth_image.shape)
             if(host_num>1):
-                util.log(self.file, f"host num: {host_num}, depth: 1.0\n")
+                # util.log(self.file, f"host num: {host_num}, depth: 1.0\n")
                 self.has_host = False
                 self.set_host_done = True
         
@@ -169,46 +173,6 @@ class Client_Server:
         self.host_frame_id = id_
         self.has_host = True
 
-def parse(data):
-    tmp = data.find("_")
-    device_id = data[0:tmp]
-    # print("===============================",device_id)
-    data = data[tmp+1:].strip()
-    tmp = data.find("_")
-    id_ = data[0:tmp]
-    # print("===============================",id_)
-    data = data[tmp+1:].strip()
-    tmp = data.find("_")
-    placeVO = data[0:tmp]
-    # print("==============================={}=============".format(placeVO))
-    data = data[tmp+1:].strip()
-    tmp = data.find("_")
-    image_raw = data[0:tmp]
-    frame = bytes(image_raw,'utf-8')
-    frame = base64.decodebytes(frame)
-    frame = np.frombuffer(frame, np.int8)
-    frame = cv2.imdecode(frame, -1)
-    # frame = cv2.resize(frame,(640,480))
-    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    # mat = np.asarray(image_raw, dtype=np.uint8)
-
-    Kalib = np.zeros((3, 3))
-    # give Kalib for the first time
-    if(len(data) > 0):
-        data = data[tmp+1:].strip('_').split(',')
-        if(len(data) == 4):
-            # print(data)
-            [fx, fy, cx, cy] = data
-            fx, fy, cx, cy = float(fx), float(fy), float(cx), float(cy)
-            Kalib[0,0] = fx
-            Kalib[0,2] = cx
-            Kalib[1,1] = fy
-            Kalib[1,2] = cy
-            Kalib[2,2] = 1
-        # TODO: add device_id in function arg (used in VA) 
-    return device_id, id_, placeVO, frame, Kalib
-    # print 'Cols n Row ' + str(mat.shape[1]) + " " + str(mat.shape[0]
-
 async def main_loop():
     async with websockets.connect('ws://localhost:9090') as websocket:
         rospy.init_node("test_publiser", anonymous=True)
@@ -218,6 +182,7 @@ async def main_loop():
         save_image = False
         topic = "/IRL_SLAM"
         server = Client_Server(topic)
+
         await util.wsSend(websocket, {
             'op':'advertise',
             'topic':topic,
@@ -236,100 +201,89 @@ async def main_loop():
 
         while True:
             try:
-                # if(server.relocalize):
-                    # server.has_pose = False
-                    # print(server.pose_now)
-                    # await util.wsPub(websocket, topic, "relocalize")
-
                 if(server.has_initialize):
-                    # server.has_pose = False
-                    # print(server.pose_now)
                     print(f"[initialize] SLAM initialized")
                     await util.wsPub(websocket, topic, "initialize")
                     server.has_initialize_send = True
                     server.has_initialize = False
                 
                 if(server.has_update):
-                    # print("send update !!!!!!!!!!!!!!!!!")
                     server.has_update = False
-                    # print("++++++++++++++++++++++++",server.update_now)
                     await util.wsPub(websocket, topic, server.update_now)
                 
-                # print("++++++++++++++++++++++++",server.update_now)
                 json_message = await websocket.recv()
                 recv_message = json.loads(json_message)
                 raw_data = recv_message['msg']['data']
-                # print(raw_data)
                 
                 if(len(raw_data)!=0):
-                    # print("publish image")
-                    device_id_now, id_now, place_now, image_now, Kalib = parse(raw_data)
-                    ''' write raw data to file
-                    # with open('/home/brian/ExcitedMail/output/raw_data.txt', 'a') as f:
-                    #     f.write(raw_data)
-                    #     f.write('\n')
 
-                    # with open('/home/brian/ExcitedMail/output/parse_data.txt', 'a') as f:
-                    #     f.write('device_id_now: ' + device_id_now)
-                    #     f.write('\n')
-                    #     f.write('id_now: ' + id_now)
-                    #     f.write('\n')
-                    #     f.write('place_now: '+ place_now)
-                    #     f.write('\n')
-                    '''
-                    if(place_now == "getId"):
+                    data = util.parse(raw_data)
+                    device_no = data['device_no']
+                    frame_no = data['frame_no']
+                    rcv_msg = data['msg']
+                    frame = data['frame']
+                    Kalib = data['kalib']
+                    raw_kalib = data['raw_kalib']
+                    enc_img = data['enc_img']
+
+                    data_verbose = dict(data)
+                    data_verbose['enc_img'] = data_verbose['enc_img'][:10]
+                    data_verbose.pop('frame')
+                    data_verbose.pop('kalib')
+                    util.print(f'[parse] [debug] data saved to csv:\n{pformat(data_verbose)}')
+                    util.log(server.file, f'{frame_no},{device_no},{rcv_msg},{enc_img},{raw_kalib},\n')
+
+                    if(rcv_msg == "getId" and int(device_no) < 0):
                         # assign id to device
-                        if(int(device_id_now) < 0):
-                            server.VO.Kalib[str(server.assigned_id_now)] = Kalib
-                            print(f"[getId] assign id {server.assigned_id_now} to device")
-                            await util.wsPub(websocket, topic, f"id,{server.assigned_id_now}")
-                            server.assigned_id_now += 1
+                        server.VO.Kalib[str(server.assigned_id_now)] = Kalib
+                        util.print(f'[getId] [debug] kalib received {raw_kalib}')
+                        print(f"[getId] assign id {server.assigned_id_now} to device")
+                        await util.wsPub(websocket, topic, f"id,{server.assigned_id_now}")
+                        server.assigned_id_now += 1
                         
-                    if(place_now == "viewer"):
+                    if(rcv_msg == "viewer"):
                         if(not server.relocalize):
                             print(f"[retrieve] no host, send relocalize msg")
                             await util.wsPub(websocket, topic, f"relocalize")
                         else:
-                            if(int(device_id_now) > 0):
-                                server.has_viewer[device_id_now] = True
-                                print(f"[scene_check] start for id {device_id_now}")
+                            if(int(device_no) > 0):
+                                server.has_viewer[device_no] = True
+                                print(f"[scene_check] start for id {device_no}")
 
-                    if(device_id_now in server.set_viewer_done and server.set_viewer_done[device_id_now]):
-                        print(f"[scene_check] {server.viewer_pose[device_id_now]}")
-                        server.set_viewer_done[device_id_now] = False
-                        # server.has_pose = False
-                        # print(server.pose_now)
-                        await util.wsPub(websocket, topic, server.viewer_pose[device_id_now])
+                    if(device_no in server.set_viewer_done and server.set_viewer_done[device_no]):
+                        print(f"[scene_check] {server.viewer_pose[device_no]}")
+                        server.set_viewer_done[device_no] = False
+                        await util.wsPub(websocket, topic, server.viewer_pose[device_no])
                        
-                    if(place_now == "host"):
-                        # if(server.relocalize):
-                        #     print(f"has_host, relocalize")
-                        #     await util.wsPub(websocket, topic, "relocalize")
+                    if(rcv_msg == "host"):
                         server.has_host = True
 
                     if(server.set_host_done):
-                        # server.has_pose = False
-                        # print(server.pose_now)
                         await util.wsPub(websocket, topic, "host_set")
                         server.set_host_done = False
                         server.relocalize = True
                         
-                    msg = br.cv2_to_imgmsg(image_now, "rgb8")
-                    msg.header.frame_id = id_now 
-                    My_msg = My_image()
-                    My_msg.id = device_id_now
-                    My_msg.image_now = msg
+                    msg = br.cv2_to_imgmsg(frame, "rgb8")
+                    msg.header.frame_id = frame_no 
                     pub.publish(msg)
+
+                    My_msg = My_image()
+                    My_msg.id = device_no
+                    My_msg.image_now = msg
                     my_pub.publish(My_msg)
+
             except websockets.ConnectionClosed as e:
                 print(f"[error] connection closed, {e}")
                 return
+            
             except TypeError as e:
                 print(f"[error] type error, {e}")
                 return
+            
             except KeyError as e:
                 print(f"[error] index error, {e}")
                 return
+            
             except Exception as e:
                 print("[error] connected loss", e)
                 return
