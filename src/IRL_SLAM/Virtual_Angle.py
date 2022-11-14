@@ -20,8 +20,16 @@ class Virtual_Angle:
         # self.Kalib[1,2] = cy
         # self.Kalib[2,2] = 1
         '''
-        # to get new 
-        self.Kalib = {}
+        # to get new
+        default_kalib = np.zeros((3, 3))
+        default_kalib[0,0] = 737.037
+        default_kalib[0,2] = 340.565
+        default_kalib[1,1] = 699.167
+        default_kalib[1,2] = 218.486
+        default_kalib[2,2] = 1
+        self.Kalib = {
+            "-1": default_kalib,
+        }
         self.colors = [(0, 0, 255),(0, 255, 0),(255, 0, 0),(255, 0, 255),(0, 255, 255),(255, 255, 255),(255,255,0),(0,0,0)]
         self.save_image = save_image
         self.save_log = save_log
@@ -39,6 +47,10 @@ class Virtual_Angle:
         self.viewer_pixel = [320,240]
         self.select_depth_center_host = [320,240]
         self.select_depth_center_viewer = [320,240]
+        self.world_pos_threshold = dict(
+            x = 0.3,
+            y = 0.1
+        )
 
     def parse(self,data):
         parsed_data_tmp = []
@@ -343,22 +355,22 @@ class Virtual_Angle:
                 v_score += np.sum(diff[1])
         u_score/=match
         v_score/=match
-        # print(u_score,v_score)
         return u_score,v_score
 
     def PlaceVO(self,u_score,v_score):
         return u_score<=70 and v_score<=70
-        return u_score<=0 and v_score<=0
-        return True
 
-    def scene_check(self,data, device_id, tracking_status):
-        self.parse(data)
-        if(not self.check_view()): 
-            return []
+    def getPixelBySlam(self,R,t, device_id):
+        new_place = np.ones((4,1))
+        new_place[0:3,0] = self.VO_world_place
+        T = np.eye(4,dtype=np.float64)
+        T[0:3,0:3] = R
+        T[0:3,3] = t
+        tmp = np.matmul(T,new_place) 
+        pixel_raw = np.matmul(self.Kalib["-1"],tmp[0:3,0])
+        return np.array([int(pixel_raw[0]/pixel_raw[2]),int(pixel_raw[1]/pixel_raw[2]),1])
 
-        if(util.orb_tracking_status[tracking_status] == 'OK'):
-            return self.SLAM_viewer(self.Tcw["Rot"],self.Tcw["Trans"], device_id)
-
+    def getPixelByBB(self, device_id):
         select_angle = 0
         smallest = np.inf
         select_T = np.eye(4,dtype=np.float64)
@@ -420,50 +432,49 @@ class Virtual_Angle:
                         d_u = int(d_u/8)
                         d_v = int(d_v/8)
                         self.select_depth_center_viewer = [d_u,d_v]
-                        # print("host depth center:",self.select_depth_center_host)
-                        # print("viewer depth center:",self.select_depth_center_viewer)
 
-        # print(f"smallest angle: {select_angle}", end='\r',flush=True)
-        # print(f"smallest angle: {select_angle}")
-        if(self.PlaceVO(select_u_score,select_v_score)):
-            new_position = self.VO_position(self.VO_world_place,select_T,select_transer, device_id)
-            u = new_position[0]
-            v = new_position[1]
-            p = (int(u),int(v))
-            pixel_uv = np.array([int(u),int(v),1])
-            self.viewer_pixel[0] = int(u)
-            self.viewer_pixel[1] = int(v)
-
-            world_p = np.matmul(inv(self.Kalib[device_id]),pixel_uv)
-            x_th = 0.3
-            if(world_p[1]>0.1):
-                world_p[1] = 0.1
-            if(world_p[0]>x_th):
-                world_p[0] = x_th
-            if(world_p[0]<-x_th):
-                world_p[0] = -x_th
-            util.print(f"[scene_check] pixel in world: {world_p}")
-            slam_pixel = self.SLAM_viewer(self.Tcw["Rot"],self.Tcw["Trans"], device_id)
-            util.print(f"[scene_check] algo position: {p}, SLAM position: {slam_pixel}")
-            print(f"[scene_check] score({select_u_score:.0f}, {select_v_score:.0f}), select angle({select_angle:.0f})")
-            self.sm_angle = select_angle
-            return pixel_uv
-            return world_p
-        else:
+        if(not self.PlaceVO(select_u_score,select_v_score)):
             select_u_score = 300 if select_u_score == np.inf else select_u_score
             select_v_score = 300 if select_v_score == np.inf else select_v_score
             print(f"[scene_check] score({select_u_score:.0f}, {select_v_score:.0f}) too high, select angle({select_angle:.0f})", end='\r',flush=True)
             util.log("/home/brian/catkin_ws/src/IRL_SLAM/log.csv", f"{select_u_score:.0f}, {select_v_score:.0f}\n")
-            return []
-        # return False
-        # print("smallest angle:",select_angle)
+            return None
 
-    def SLAM_viewer(self,R,t, device_id):
-        new_place = np.ones((4,1))
-        new_place[0:3,0] = self.VO_world_place
-        T = np.eye(4,dtype=np.float64)
-        T[0:3,0:3] = R
-        T[0:3,3] = t
-        tmp = np.matmul(T,new_place) 
-        pixel_raw = np.matmul(self.Kalib[device_id],tmp[0:3,0])
-        return (int(pixel_raw[0]/pixel_raw[2]),int(pixel_raw[1]/pixel_raw[2]))
+        self.sm_angle = select_angle
+        print(f"[scene_check] score({select_u_score:.0f}, {select_v_score:.0f}), select angle({select_angle:.0f})")
+
+        raw_pixel = self.VO_position(self.VO_world_place,select_T,select_transer, device_id)
+        pixel = np.array([int(raw_pixel[0]),int(raw_pixel[1]),1])
+        return pixel
+
+    def getPosByPixel(self, pixel, device_id):
+        world_p = np.matmul(inv(self.Kalib[device_id]),pixel)
+        world_p[1] = self.world_pos_threshold['y'] if (world_p[1] > self.world_pos_threshold['y']) else world_p[1]
+        world_p[0] = self.world_pos_threshold['x'] if (world_p[0] > self.world_pos_threshold['x']) else world_p[0]
+        world_p[0] = -self.world_pos_threshold['x'] if (world_p[0] < -self.world_pos_threshold['x']) else world_p[0]
+        util.print(f"[scene_check] pos in world: {world_p}")
+        return world_p
+
+    def scene_check(self, data, device_id, tracking_status):
+        self.parse(data)
+        ret = dict(
+            done = False,
+            pixel = None,
+            pos = None
+        )
+
+        if(not self.check_view()): 
+            return ret
+
+        slam_pixel = self.getPixelBySlam(self.Tcw["Rot"],self.Tcw["Trans"], device_id)
+        bb_pixel = self.getPixelByBB()
+        ret['pixel'] = slam_pixel if (util.orb_tracking_status[tracking_status] == 'OK') else bb_pixel
+        if(ret['pixel'] == None):
+            return ret
+        
+        util.print(f"[scene_check] algo pixel: {bb_pixel}, SLAM pixel: {slam_pixel}")
+        ret['pos'] = self.getPoseByPixel(ret['pixel'], device_id)
+        ret['done'] = True
+        return ret
+
+

@@ -27,7 +27,7 @@ import Virtual_Angle as VA
 from Util import Util
 from pprint import pformat
 
-util = Util(verbose=False, log=True)
+util = Util(verbose=False, log=False)
 br = CvBridge()
 
 class Client_Server:
@@ -51,13 +51,14 @@ class Client_Server:
         self.set_host_done = False
         self.has_viewer = {}
         self.set_viewer_done = {}
-        self.viewer_pose = {}
+        self.viewer_pose_msg = {}
         self.pose = {}
         self.tracking_status = {}
         self.has_initialize = False
         self.has_initialize_send = False
         self.relocalize = False
         self.assigned_id_now = 0
+        self.pixel = True
         with open("/home/brian/catkin_ws/src/IRL_SLAM/raw_data_seq.csv", 'w') as f:
             f.write(f'frame_no,device_no,msg,enc_img,raw_kalib\n')
         f.close()
@@ -130,8 +131,13 @@ class Client_Server:
             else:
                 util.print(f"[scene_check] device_id not in tracking_status, use 'Lost' instead")
                 self.pose[device_id] = self.VO.scene_check(total_data_tmp, device_id, '3')
-            if(len(self.pose[device_id])!=0):
+            
+            if(self.pose[device_id]['done']):
                 print(f"[scene_check] viewer (id:{device_id}) done")
+                pixel = self.pose[device_id]['pixel']
+                pos = self.pose[device_id]['pos']
+
+                # TODO: add depth to return msg
                 ''' depth
                 # cv_image = br.imgmsg_to_cv2(data.image_now, "rgb8")
                 # depth_image = self.net.depth_estimate(cv_image)
@@ -148,10 +154,13 @@ class Client_Server:
                 # print(f"host depth: {depth_h:.4f}, viewer depth:{self.viewer_depth:.4f}")
                 # # if(self.viewer_depth<=1):
                 # #     self.viewer_depth = 1.2
-                # # self.viewer_pose = f"viewer_done,{pose[0]:.4f},{pose[1]:.4f},{self.viewer_depth:.4f}"
+                # # self.viewer_pose_msg = f"viewer_done,{pose[0]:.4f},{pose[1]:.4f},{self.viewer_depth:.4f}"
                 # util.log(self.file, f"pose: {pose[0]:.4f}, {pose[1]:.4f}, depth ratio: {self.viewer_depth:.4f}, angle: {self.VO.sm_angle}\n")
                 '''
-                self.viewer_pose[device_id] = f"viewer_done,{self.pose[device_id][0]},{self.pose[device_id][1]},{self.VO.sm_angle:.0f},{device_id}"
+                
+                pixel_msg = f"viewer_done,{pixel[0]},{pixel[1]},{self.VO.sm_angle:.0f},{device_id}"
+                pos_msg = f"viewer_done,{pos[0]},{pixel[1]},{self.VO.sm_angle:.0f},{device_id}"
+                self.viewer_pose_msg[device_id] = pixel_msg if self.pixel else pos_msg
                 self.set_viewer_done[device_id] = True
                 self.has_viewer[device_id] = False
 
@@ -216,7 +225,6 @@ async def main_loop():
                 raw_data = recv_message['msg']['data']
                 
                 if(len(raw_data)!=0):
-
                     data = util.parse(raw_data)
                     device_no = data['device_no']
                     frame_no = data['frame_no']
@@ -251,9 +259,9 @@ async def main_loop():
                                 print(f"[scene_check] start for id {device_no}")
 
                     if(device_no in server.set_viewer_done and server.set_viewer_done[device_no]):
-                        print(f"[scene_check] {server.viewer_pose[device_no]}")
+                        print(f"[scene_check] {server.viewer_pose_msg[device_no]}")
                         server.set_viewer_done[device_no] = False
-                        await util.wsPub(websocket, topic, server.viewer_pose[device_no])
+                        await util.wsPub(websocket, topic, server.viewer_pose_msg[device_no])
                        
                     if(rcv_msg == "host"):
                         server.has_host = True
